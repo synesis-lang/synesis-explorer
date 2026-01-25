@@ -1,0 +1,25 @@
+{
+  "comments": {
+    "lineComment": "#"
+  },
+  "brackets": [
+    ["[", "]"],
+    ["(", ")"]
+  ],
+  "autoClosingPairs": [
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""]
+  ],
+  "surroundingPairs": [
+    ["[", "]"],
+    ["(", ")"],
+    ["\"", "\""]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*(SOURCE|ITEM|ONTOLOGY|FIELD|PROJECT|TEMPLATE)\\b",
+      "end": "^\\s*END\\s+(SOURCE|ITEM|ONTOLOGY|FIELD|PROJECT|TEMPLATE)\\b"
+    }
+  }
+}

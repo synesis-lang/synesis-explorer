@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synesis / VSCode icon (vetor puro, versão geométrica e simétrica) -->
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="128" height="128"
+     viewBox="0 0 128 128"
+     role="img" aria-label="Synesis icon (circled S)">
+  <title>Synesis icon (circled S)</title>
+
+  <!-- Círculo (contorno) -->
+  <circle cx="64" cy="64" r="56"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="8"
+          stroke-linecap="round"
+          stroke-linejoin="round"/>
+
+  <!-- “S” geométrico: traço uniforme, centrado e com curvas balanceadas -->
+  <path d="
+    M 90 40
+    C 84 30, 72 26, 60 28
+    C 49 30, 42 36, 40 44
+    C 38 54, 46 60, 60 63
+    C 76 66, 90 72, 88 88
+    C 86 98, 76 104, 64 105
+    C 50 106, 40 100, 36 92
+  "
+        fill="none"
+        stroke="currentColor"
+        stroke-width="11"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Ajuste óptico (placeholder, praticamente invisível) -->
+  <path d="
+    M 44 58
+    C 46 54, 52 52, 60 53
+    C 68 54, 74 56, 76 60
+  "
+        fill="none"
+        stroke="currentColor"
+        stroke-width="11"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.001"/>
+</svg>

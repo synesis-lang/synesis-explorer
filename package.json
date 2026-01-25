@@ -1,0 +1,254 @@
+{
+  "name": "synesis-explorer",
+  "displayName": "Synesis Explorer",
+  "description": "VSCode extension for exploring Synesis knowledge synthesis files",
+  "version": "0.3.0",
+  "publisher": "synesis",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/synesis-lang/synesis-explorer"
+  },
+  "icon": "synesis-icon.png",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:synesis.reference.refresh",
+    "onCommand:synesis.reference.filter",
+    "onCommand:synesis.code.refresh",
+    "onCommand:synesis.code.filter",
+    "onCommand:synesis.relation.refresh",
+    "onCommand:synesis.relation.filter",
+    "onCommand:synesis.ontology.refresh",
+    "onCommand:synesis.ontology.filter",
+    "onCommand:synesis.ontology.annotation.refresh",
+    "onCommand:synesis.showGraph",
+    "onCommand:synesis.showAbstract",
+    "onCommand:synesis.openLocation",
+    "onLanguage:synesis"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "synesis",
+        "aliases": ["Synesis", "synesis"],
+        "extensions": [".syn", ".synt", ".synp", ".syno"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "synesis",
+        "scopeName": "source.synesis",
+        "path": "./syntaxes/synesis.tmLanguage.json"
+      }
+    ],
+    "themes": [
+      {
+        "label": "Synesis Dark",
+        "uiTheme": "vs-dark",
+        "path": "./themes/synesis-dark-theme.json"
+      },
+      {
+        "label": "Synesis Light",
+        "uiTheme": "vs",
+        "path": "./themes/synesis-light-theme.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "synesis-file-icons",
+        "label": "Synesis File Icons",
+        "path": "./icons/synesis-file-icon-theme.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "synesis-explorer",
+          "title": "Synesis Explorer",
+          "icon": "synesis-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "synesis-explorer": [
+        {
+          "id": "synesisReferenceExplorer",
+          "name": "References",
+          "when": "synesis.activeFileKind == syn"
+        },
+        {
+          "id": "synesisCodeExplorer",
+          "name": "Codes",
+          "when": "synesis.activeFileKind == syn"
+        },
+        {
+          "id": "synesisRelationExplorer",
+          "name": "Relations",
+          "when": "synesis.hasChains && synesis.activeFileKind == syn"
+        },
+        {
+          "id": "synesisOntologyTopicsExplorer",
+          "name": "Ontology Topics",
+          "when": "synesis.hasTopics && synesis.activeFileKind == syno"
+        },
+        {
+          "id": "synesisOntologyAnnotationExplorer",
+          "name": "Ontology (Annotations)",
+          "when": "synesis.hasOntologyAnnotations && synesis.activeFileKind == syn"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "synesis.reference.refresh",
+        "title": "Refresh References",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.reference.filter",
+        "title": "Filter References",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.code.refresh",
+        "title": "Refresh Codes",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.code.filter",
+        "title": "Filter Codes",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.relation.refresh",
+        "title": "Refresh Relations",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.relation.filter",
+        "title": "Filter Relations",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.ontology.refresh",
+        "title": "Refresh Ontology Topics",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.ontology.filter",
+        "title": "Filter Ontology Topics",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.ontology.annotation.refresh",
+        "title": "Refresh Ontology (Annotations)",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.showGraph",
+        "title": "Synesis: Show Relation Graph"
+      },
+      {
+        "command": "synesis.showAbstract",
+        "title": "Synesis: Show Abstract"
+      },
+      {
+        "command": "synesis.openLocation",
+        "title": "Open Location"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "synesis.showGraph",
+        "key": "ctrl+alt+g",
+        "mac": "cmd+shift+g",
+        "when": "editorTextFocus && editorLangId == synesis"
+      },
+      {
+        "command": "synesis.showAbstract",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a",
+        "when": "editorTextFocus && editorLangId == synesis"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "synesis.reference.refresh",
+          "when": "view == synesisReferenceExplorer && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.reference.filter",
+          "when": "view == synesisReferenceExplorer && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.code.refresh",
+          "when": "view == synesisCodeExplorer && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.code.filter",
+          "when": "view == synesisCodeExplorer && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.relation.refresh",
+          "when": "view == synesisRelationExplorer && synesis.hasChains && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.relation.filter",
+          "when": "view == synesisRelationExplorer && synesis.hasChains && synesis.activeFileKind == syn",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.refresh",
+          "when": "view == synesisOntologyTopicsExplorer && synesis.hasTopics && synesis.activeFileKind == syno",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.filter",
+          "when": "view == synesisOntologyTopicsExplorer && synesis.hasTopics && synesis.activeFileKind == syno",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.annotation.refresh",
+          "when": "view == synesisOntologyAnnotationExplorer && synesis.hasOntologyAnnotations && synesis.activeFileKind == syn",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "node esbuild.js",
+    "build:watch": "node esbuild.js --watch",
+    "test": "node ./test/runTest.js",
+    "lint": "eslint .",
+    "compile": "npm run build",
+    "watch": "npm run build:watch",
+    "package": "vsce package",
+    "vscode:prepublish": "npm run build"
+  },
+  "dependencies": {
+    "bibtex-parse-js": "^0.0.24"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.60.0",
+    "@types/node": "^14.x",
+    "vsce": "^2.15.0",
+    "mocha": "^10.0.0",
+    "chai": "^4.3.0",
+    "eslint": "^8.0.0",
+    "esbuild": "^0.20.2"
+  }
+}

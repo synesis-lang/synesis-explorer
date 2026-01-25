@@ -1,0 +1,29 @@
+# Sample Synesis file for testing
+
+SOURCE @ashworth2019
+    description: Comparative study of public attitudes toward CCS
+    epistemic_model: Social acceptance of energy technologies
+    method: Online survey
+END SOURCE
+
+ITEM @ashworth2019
+    text: However, male respondents were more likely to support CCS.
+    note: Gender influences support
+    code: Gender, CCS_Support
+END ITEM
+
+ITEM @ashworth2019
+    text: Younger respondents showed higher acceptance.
+    note: Age factor
+    code: Age, CCS_Support
+END ITEM
+
+SOURCE @smith2020
+    description: Analysis of renewable energy adoption
+    method: Field study
+END SOURCE
+
+ITEM @smith2020
+    text: Economic incentives drive adoption rates.
+    code: Economic_Factors, Adoption
+END ITEM

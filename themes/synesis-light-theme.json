@@ -1,0 +1,81 @@
+{
+  "name": "Synesis Light",
+  "type": "light",
+  "colors": {
+    "editor.background": "#ffffff",
+    "editor.foreground": "#2d2d2d"
+  },
+  "tokenColors": [
+    {
+      "name": "Keywords",
+      "scope": [
+        "keyword.control.block.synesis",
+        "keyword.control.field.synesis",
+        "keyword.control.type.synesis",
+        "keyword.control.scope.synesis"
+      ],
+      "settings": {
+        "foreground": "#c62828",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "References",
+      "scope": "entity.name.reference.synesis",
+      "settings": {
+        "foreground": "#ef6c00",
+        "fontStyle": "underline"
+      }
+    },
+    {
+      "name": "Fields",
+      "scope": "entity.name.tag.field.synesis",
+      "settings": {
+        "foreground": "#00838f",
+        "fontStyle": "bold"
+      }
+    },
+    {
+      "name": "Chain Codes",
+      "scope": "variable.other.code.synesis",
+      "settings": {
+        "foreground": "#1565c0"
+      }
+    },
+    {
+      "name": "Chain Relations",
+      "scope": "constant.language.relation.synesis",
+      "settings": {
+        "foreground": "#d84315"
+      }
+    },
+    {
+      "name": "Chain Arrows",
+      "scope": "keyword.operator.arrow.synesis",
+      "settings": {
+        "foreground": "#2d2d2d"
+      }
+    },
+    {
+      "name": "Field Values",
+      "scope": [
+        "string.quoted.field.synesis",
+        "string.unquoted.field.synesis"
+      ],
+      "settings": {
+        "foreground": "#6d4c41"
+      }
+    },
+    {
+      "name": "Comments",
+      "scope": [
+        "comment.line.synesis",
+        "comment.line.number-sign.synesis"
+      ],
+      "settings": {
+        "foreground": "#2e7d32",
+        "fontStyle": "italic"
+      }
+    }
+  ]
+}

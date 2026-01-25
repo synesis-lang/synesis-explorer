@@ -1,0 +1,16 @@
+{
+  "iconDefinitions": {
+    "_syn": { "iconPath": "./file-syn.svg" },
+    "_syno": { "iconPath": "./file-syno.svg" },
+    "_synt": { "iconPath": "./file-synt.svg" },
+    "_synp": { "iconPath": "./file-synp.svg" },
+    "_bib": { "iconPath": "./file-bib.svg" }
+  },
+  "fileExtensions": {
+    "syn": "_syn",
+    "syno": "_syno",
+    "synt": "_synt",
+    "synp": "_synp",
+    "bib": "_bib"
+  }
+}

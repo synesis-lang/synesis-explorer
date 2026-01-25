@@ -1,0 +1,13 @@
+.vscode/**
+.vscode-test/**
+test/**
+.gitignore
+.eslintrc.json
+*.vsix
+node_modules/**
+src/**
+esbuild.js
+extension.js
+package-lock.json
+ROTEIRO_TECNICO.md
+ADENDO_LARK_JS.md

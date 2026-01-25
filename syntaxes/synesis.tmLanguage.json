@@ -1,0 +1,229 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Synesis",
+  "scopeName": "source.synesis",
+  "patterns": [
+    {"include": "#comments"},
+    {"include": "#keywords"},
+    {"include": "#references"},
+    {"include": "#blocks"},
+    {"include": "#fields"},
+    {"include": "#chains"}
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.synesis",
+          "match": "#.*$"
+        }
+      ]
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.block.synesis",
+          "match": "(?i)\\b(SOURCE|ITEM|ONTOLOGY|END|PROJECT|TEMPLATE|FIELDS|METADATA|DESCRIPTION|INCLUDE|BIBLIOGRAPHY|ANNOTATIONS)\\b"
+        },
+        {
+          "name": "keyword.control.field.synesis",
+          "match": "(?i)\\b(FIELD|TYPE|SCOPE|RELATIONS|ARITY|VALUES|FORMAT|REQUIRED|OPTIONAL|FORBIDDEN|BUNDLE)\\b"
+        },
+        {
+          "name": "keyword.control.type.synesis",
+          "match": "(?i)\\b(CODE|TEXT|MEMO|QUOTATION|CHAIN|DATE|SCALE|ENUMERATED|ORDERED|TOPIC)\\b"
+        },
+        {
+          "name": "keyword.control.scope.synesis",
+          "match": "(?i)\\b(ITEM|SOURCE|ONTOLOGY|PROJECT)\\b(?=\\s*$|\\s+[^:])"
+        }
+      ]
+    },
+    "references": {
+      "patterns": [
+        {
+          "name": "entity.name.reference.synesis",
+          "match": "@[\\p{L}\\p{N}][\\p{L}\\p{N}._-]*",
+          "captures": {
+            "0": {"name": "entity.name.reference.synesis"}
+          }
+        }
+      ]
+    },
+    "blocks": {
+      "patterns": [
+        {
+          "name": "meta.block.source.synesis",
+          "begin": "\\b(SOURCE)\\s+(@[\\p{L}\\p{N}][\\p{L}\\p{N}._-]*)",
+          "end": "\\b(END)\\s+(SOURCE)\\b",
+          "beginCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "entity.name.reference.synesis"}
+          },
+          "endCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "keyword.control.block.synesis"}
+          },
+          "patterns": [
+            {"include": "#comments"},
+            {"include": "#fields"}
+          ]
+        },
+        {
+          "name": "meta.block.item.synesis",
+          "begin": "\\b(ITEM)\\s+(@[\\p{L}\\p{N}][\\p{L}\\p{N}._-]*)",
+          "end": "\\b(END)\\s+(ITEM)\\b",
+          "beginCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "entity.name.reference.synesis"}
+          },
+          "endCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "keyword.control.block.synesis"}
+          },
+          "patterns": [
+            {"include": "#comments"},
+            {"include": "#fields"},
+            {"include": "#chains"}
+          ]
+        },
+        {
+          "name": "meta.block.ontology.synesis",
+          "begin": "\\b(ONTOLOGY)\\s+(@[\\p{L}\\p{N}][\\p{L}\\p{N}._-]*)",
+          "end": "\\b(END)\\s+(ONTOLOGY)\\b",
+          "beginCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "entity.name.reference.synesis"}
+          },
+          "endCaptures": {
+            "1": {"name": "keyword.control.block.synesis"},
+            "2": {"name": "keyword.control.block.synesis"}
+          },
+          "patterns": [
+            {"include": "#comments"},
+            {"include": "#fields"}
+          ]
+        },
+        {
+          "name": "meta.block.field.synesis",
+          "begin": "\\b(FIELD)\\s+([\\p{L}_][\\p{L}\\p{N}._-]*)",
+          "end": "\\b(END)\\s+(FIELD)\\b",
+          "beginCaptures": {
+            "1": {"name": "keyword.control.field.synesis"},
+            "2": {"name": "entity.name.field.synesis"}
+          },
+          "endCaptures": {
+            "1": {"name": "keyword.control.field.synesis"},
+            "2": {"name": "keyword.control.field.synesis"}
+          },
+          "patterns": [
+            {"include": "#comments"},
+            {"include": "#keywords"},
+            {"include": "#fields"}
+          ]
+        }
+      ]
+    },
+    "fields": {
+      "patterns": [
+        {
+          "name": "meta.field.chain.synesis",
+          "begin": "^\\s*(chain|chains)\\s*:",
+          "end": "^(?=\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*END\\b|\\s*SOURCE\\b|\\s*ITEM\\b|\\s*ONTOLOGY\\b|\\s*FIELD\\b|\\s*PROJECT\\b|\\s*TEMPLATE\\b)",
+          "beginCaptures": {
+            "1": {"name": "entity.name.tag.field.synesis"}
+          },
+          "patterns": [
+            {"include": "#chain-content"}
+          ]
+        },
+        {
+          "name": "meta.field.code.synesis",
+          "begin": "^\\s*(code|codes)\\s*:",
+          "end": "^(?=\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*END\\b|\\s*SOURCE\\b|\\s*ITEM\\b|\\s*ONTOLOGY\\b|\\s*FIELD\\b|\\s*PROJECT\\b|\\s*TEMPLATE\\b)",
+          "beginCaptures": {
+            "1": {"name": "entity.name.tag.field.synesis"}
+          },
+          "patterns": [
+            {
+              "name": "variable.other.code.synesis",
+              "match": "[\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*"
+            },
+            {
+              "name": "punctuation.separator.comma.synesis",
+              "match": ","
+            }
+          ]
+        },
+        {
+          "name": "meta.field.text.synesis",
+          "begin": "^\\s*(text|quote|note|description|method|epistemic_model)\\s*:",
+          "end": "^(?=\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*END\\b|\\s*SOURCE\\b|\\s*ITEM\\b|\\s*ONTOLOGY\\b|\\s*FIELD\\b|\\s*PROJECT\\b|\\s*TEMPLATE\\b)",
+          "beginCaptures": {
+            "1": {"name": "entity.name.tag.field.synesis"}
+          },
+          "patterns": [
+            {
+              "name": "string.quoted.field.synesis",
+              "match": ".*"
+            }
+          ]
+        },
+        {
+          "name": "meta.field.generic.synesis",
+          "begin": "^\\s*([\\p{L}_][\\p{L}\\p{N}._-]*)\\s*:",
+          "end": "^(?=\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*END\\b|\\s*SOURCE\\b|\\s*ITEM\\b|\\s*ONTOLOGY\\b|\\s*FIELD\\b|\\s*PROJECT\\b|\\s*TEMPLATE\\b)",
+          "beginCaptures": {
+            "1": {"name": "entity.name.tag.field.synesis"}
+          },
+          "patterns": [
+            {
+              "name": "string.unquoted.field.synesis",
+              "match": ".*"
+            }
+          ]
+        }
+      ]
+    },
+    "chains": {
+      "patterns": [
+        {
+          "name": "meta.chain.qualified.synesis",
+          "match": "([\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*)\\s*(->)\\s*(INFLUENCES|ENABLES|CONSTRAINS|CONTESTED-BY|RELATES-TO|CAUSES|PREVENTS|REQUIRES|EXCLUDES|CORRELATES|DEPENDS-ON)\\s*(->)\\s*([\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*)",
+          "captures": {
+            "1": {"name": "variable.other.code.synesis"},
+            "2": {"name": "keyword.operator.arrow.synesis"},
+            "3": {"name": "constant.language.relation.synesis"},
+            "4": {"name": "keyword.operator.arrow.synesis"},
+            "5": {"name": "variable.other.code.synesis"}
+          }
+        },
+        {
+          "name": "meta.chain.simple.synesis",
+          "match": "([\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*)\\s*(->)\\s*([\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*)",
+          "captures": {
+            "1": {"name": "variable.other.code.synesis"},
+            "2": {"name": "keyword.operator.arrow.synesis"},
+            "3": {"name": "variable.other.code.synesis"}
+          }
+        }
+      ]
+    },
+    "chain-content": {
+      "patterns": [
+        {
+          "name": "constant.language.relation.synesis",
+          "match": "\\b(INFLUENCES|ENABLES|CONSTRAINS|CONTESTED-BY|RELATES-TO|CAUSES|PREVENTS|REQUIRES|EXCLUDES|CORRELATES|DEPENDS-ON)\\b"
+        },
+        {
+          "name": "keyword.operator.arrow.synesis",
+          "match": "->"
+        },
+        {
+          "name": "variable.other.code.synesis",
+          "match": "\\b[\\p{L}\\p{N}_][\\p{L}\\p{N}._-]*\\b"
+        }
+      ]
+    }
+  }
+}
