@@ -6,26 +6,18 @@
  *     Agrupa por tipo de relacao e permite navegacao para a origem.
  *
  * Componentes principais:
- *     - refresh: Escaneia workspace e atualiza o indice
+ *     - refresh: Obtém dados via DataService (LSP ou regex local)
  *     - getChildren: Retorna relacoes ou triplets
  *
  * Dependencias criticas:
- *     - TemplateManager: carregamento do template
- *     - SynesisParser: parse de ITEMs
- *     - chainParser: extracao de codigos e relacoes
+ *     - DataService: Adapter LSP/local para dados normalizados
  */
 
 const vscode = require('vscode');
-const SynesisParser = require('../../parsers/synesisParser');
-const FieldRegistry = require('../../core/fieldRegistry');
-const chainParser = require('../../parsers/chainParser');
-const positionUtils = require('../../utils/positionUtils');
 
 class RelationExplorer {
-    constructor(workspaceScanner, templateManager) {
-        this.scanner = workspaceScanner;
-        this.templateManager = templateManager;
-        this.parser = new SynesisParser();
+    constructor(dataService) {
+        this.dataService = dataService;
         this.relations = new Map(); // relation -> [triplets]
         this.filterText = '';
 
@@ -34,88 +26,24 @@ class RelationExplorer {
     }
 
     /**
-     * Escaneia workspace e atualiza indice de relacoes
+     * Obtém relações via DataService e atualiza índice
      */
     async refresh() {
         this.relations.clear();
 
         try {
-            const projectUri = await this.scanner.findProjectFile();
-            if (!projectUri) {
-                await this._setHasChains(false);
-                this._onDidChangeTreeData.fire();
-                return;
+            const relations = await this.dataService.getRelations();
+
+            for (const entry of relations) {
+                this.relations.set(entry.relation, entry.triplets);
             }
 
-            const registry = await this.templateManager.loadTemplate(projectUri);
-            const info = this.templateManager.getTemplateInfo(projectUri);
-            const fieldRegistry = new FieldRegistry(registry);
-            const chainFields = fieldRegistry.getChainFields();
-            const hasChains = Boolean(info && info.fromTemplate && info.hasChainFields && chainFields.length > 0);
-
-            await this._setHasChains(hasChains);
-            if (!hasChains) {
-                this._onDidChangeTreeData.fire();
-                return;
-            }
-
-            const synFiles = await this.scanner.findSynFiles();
-
-            for (const fileUri of synFiles) {
-                await this._scanFile(fileUri, chainFields, registry);
-            }
-
+            await this._setHasChains(this.relations.size > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
             console.error('Error scanning relations:', error);
             await this._setHasChains(false);
             vscode.window.showErrorMessage(`Failed to scan relations: ${error.message}`);
-        }
-    }
-
-    /**
-     * Escaneia um arquivo .syn individual
-     * @private
-     */
-    async _scanFile(fileUri, chainFields, registry) {
-        const content = await vscode.workspace.fs.readFile(fileUri);
-        const text = content.toString();
-        const filePath = fileUri.fsPath;
-        const lineOffsets = positionUtils.buildLineOffsets(text);
-
-        const items = this.parser.parseItems(text, filePath);
-
-        for (const item of items) {
-            for (const fieldName of chainFields) {
-                if (!item.fields[fieldName]) {
-                    continue;
-                }
-
-                const fieldDef = registry[fieldName] || {};
-                const parsed = chainParser.parseChain(item.fields[fieldName], fieldDef);
-
-                for (let index = 0; index < parsed.relations.length; index += 1) {
-                    const relation = parsed.relations[index];
-                    const from = parsed.codes[index];
-                    const to = parsed.codes[index + 1];
-                    const position = this._findTokenPosition(item, fieldName, relation, lineOffsets);
-                    const line = position ? position.line : item.line;
-                    const column = position ? position.column : 0;
-
-                    if (!this.relations.has(relation)) {
-                        this.relations.set(relation, []);
-                    }
-
-                    this.relations.get(relation).push({
-                        from,
-                        to,
-                        file: filePath,
-                        line,
-                        column,
-                        type: parsed.type
-                    });
-                }
-            }
         }
     }
 
@@ -159,58 +87,6 @@ class RelationExplorer {
     getFilter() {
         return this.filterText;
     }
-
-    _findTokenPosition(item, fieldName, token, lineOffsets) {
-        if (!item.blockContent || typeof item.blockOffset !== 'number') {
-            return null;
-        }
-
-        const fieldInfo = this._findFieldValueInfo(item.blockContent, fieldName);
-        if (!fieldInfo) {
-            return null;
-        }
-
-        const tokenOffset = this._findTokenOffset(fieldInfo.value, token);
-        if (tokenOffset === null) {
-            return null;
-        }
-
-        const absoluteOffset = item.blockOffset + fieldInfo.valueStart + tokenOffset;
-        return positionUtils.getLineColumn(lineOffsets, absoluteOffset);
-    }
-
-    _findFieldValueInfo(blockContent, fieldName) {
-        const escapedName = this._escapeRegex(fieldName);
-        const pattern = new RegExp(
-            `^\\s*${escapedName}\\s*:\\s*([\\s\\S]*?)(?=^\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*(?![\\s\\S]))`,
-            'gmu'
-        );
-
-        const match = pattern.exec(blockContent);
-        if (!match) {
-            return null;
-        }
-
-        const value = match[1];
-        const valueStart = match.index + match[0].length - value.length;
-
-        return { value, valueStart };
-    }
-
-    _findTokenOffset(value, token) {
-        const escaped = this._escapeRegex(token);
-        const pattern = new RegExp(`(^|[^\\p{L}\\p{N}._-])(${escaped})(?=$|[^\\p{L}\\p{N}._-])`, 'u');
-        const match = pattern.exec(value);
-        if (!match) {
-            return null;
-        }
-
-        return match.index + match[1].length;
-    }
-
-    _escapeRegex(text) {
-        return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
 }
 
 class RelationTreeItem extends vscode.TreeItem {
@@ -233,13 +109,16 @@ class TripletTreeItem extends vscode.TreeItem {
 
         this.description = triplet.type;
         this.iconPath = new vscode.ThemeIcon('file');
-        this.tooltip = triplet.file;
+        this.tooltip = triplet.file || '';
         this.contextValue = 'relationTriplet';
-        this.command = {
-            command: 'synesis.openLocation',
-            title: 'Open Location',
-            arguments: [triplet.file, triplet.line, triplet.column]
-        };
+
+        if (triplet.file) {
+            this.command = {
+                command: 'synesis.openLocation',
+                title: 'Open Location',
+                arguments: [triplet.file, triplet.line, triplet.column]
+            };
+        }
     }
 }
 

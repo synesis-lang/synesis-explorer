@@ -24,6 +24,7 @@
 const path = require('path');
 const vscode = require('vscode');
 const SynesisLspClient = require('./src/lsp/synesisClient');
+const DataService = require('./src/services/dataService');
 
 // Core
 const TemplateManager = require('./src/core/templateManager');
@@ -43,6 +44,7 @@ const AbstractViewer = require('./src/viewers/abstractViewer');
 let lspClient;
 let lspStatusItem;
 let lspLoadTimer;
+let dataService;
 
 /**
  * @param {vscode.ExtensionContext} context
@@ -77,20 +79,27 @@ function activate(context) {
     const templateManager = new TemplateManager();
     const workspaceScanner = new WorkspaceScanner();
 
+    // DataService (Adapter Pattern: LSP vs local regex)
+    dataService = new DataService({
+        lspClient: lspClient || null,
+        workspaceScanner,
+        templateManager
+    });
+
     // Initialize Reference Explorer
-    const referenceExplorer = new ReferenceExplorer(workspaceScanner);
+    const referenceExplorer = new ReferenceExplorer(dataService);
     const referenceTreeView = vscode.window.createTreeView('synesisReferenceExplorer', {
         treeDataProvider: referenceExplorer,
         showCollapseAll: true
     });
 
-    const codeExplorer = new CodeExplorer(workspaceScanner, templateManager);
+    const codeExplorer = new CodeExplorer(dataService);
     const codeTreeView = vscode.window.createTreeView('synesisCodeExplorer', {
         treeDataProvider: codeExplorer,
         showCollapseAll: true
     });
 
-    const relationExplorer = new RelationExplorer(workspaceScanner, templateManager);
+    const relationExplorer = new RelationExplorer(dataService);
     const relationTreeView = vscode.window.createTreeView('synesisRelationExplorer', {
         treeDataProvider: relationExplorer,
         showCollapseAll: true
@@ -109,7 +118,7 @@ function activate(context) {
     });
 
     const abstractViewer = new AbstractViewer(workspaceScanner, templateManager);
-    const graphViewer = new GraphViewer(workspaceScanner, templateManager);
+    const graphViewer = new GraphViewer(dataService);
 
     // Register commands
     const refreshAllExplorers = () => {
@@ -295,6 +304,50 @@ function activate(context) {
         })
     );
 
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.code.goToDefinition', async (treeItem) => {
+            if (!treeItem || !treeItem.code) {
+                return;
+            }
+
+            const position = await findSymbolPosition(treeItem);
+            if (!position) {
+                vscode.window.showWarningMessage('Could not find code position for definition lookup.');
+                return;
+            }
+
+            const definitions = await vscode.commands.executeCommand(
+                'vscode.executeDefinitionProvider',
+                position.uri,
+                position.position
+            );
+
+            if (definitions && definitions.length > 0) {
+                const def = definitions[0];
+                const targetUri = def.targetUri || def.uri;
+                const targetRange = def.targetRange || def.range;
+                const doc = await vscode.workspace.openTextDocument(targetUri);
+                const editor = await vscode.window.showTextDocument(doc);
+                editor.selection = new vscode.Selection(targetRange.start, targetRange.start);
+                editor.revealRange(targetRange, vscode.TextEditorRevealType.InCenter);
+            } else {
+                vscode.window.showWarningMessage(`No definition found for "${treeItem.code}".`);
+            }
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.code.rename', async (treeItem) => {
+            await renameSymbol(treeItem, 'code', 'Enter new code name');
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.reference.rename', async (treeItem) => {
+            await renameSymbol(treeItem, 'bibref', 'Enter new reference name (with @)');
+        })
+    );
+
     // File watchers
     const synWatcher = vscode.workspace.createFileSystemWatcher('**/*.syn');
     synWatcher.onDidChange(() => {
@@ -414,6 +467,88 @@ async function openLocation(filePath, line, column = 0) {
         editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
     } catch (error) {
         vscode.window.showErrorMessage(`Failed to open location: ${error.message}`);
+    }
+}
+
+/**
+ * Finds a position in the workspace where a symbol (code or bibref) appears.
+ * Used by Go to Definition and Rename handlers.
+ */
+async function findSymbolPosition(treeItem) {
+    const symbol = treeItem.code || treeItem.bibref;
+    if (!symbol) {
+        return null;
+    }
+
+    if (treeItem.occurrences && treeItem.occurrences.length > 0) {
+        const occ = treeItem.occurrences[0];
+        const uri = vscode.Uri.file(occ.file);
+        return { uri, position: new vscode.Position(occ.line, occ.column || 0) };
+    }
+
+    const files = await vscode.workspace.findFiles('**/*.syn', null, 50);
+    for (const fileUri of files) {
+        const doc = await vscode.workspace.openTextDocument(fileUri);
+        const text = doc.getText();
+        const idx = text.indexOf(symbol);
+        if (idx >= 0) {
+            const pos = doc.positionAt(idx);
+            return { uri: fileUri, position: pos };
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Renames a symbol (code or bibref) using the LSP rename provider.
+ */
+async function renameSymbol(treeItem, symbolKey, promptMessage) {
+    const symbol = treeItem ? treeItem[symbolKey] : null;
+    if (!symbol) {
+        return;
+    }
+
+    const newName = await vscode.window.showInputBox({
+        prompt: promptMessage,
+        value: symbol,
+        validateInput: (value) => {
+            if (!value || !value.trim()) {
+                return 'Name cannot be empty';
+            }
+            if (value.trim() === symbol) {
+                return 'Name must be different';
+            }
+            return null;
+        }
+    });
+
+    if (!newName) {
+        return;
+    }
+
+    const position = await findSymbolPosition(treeItem);
+    if (!position) {
+        vscode.window.showWarningMessage('Could not find symbol position for rename.');
+        return;
+    }
+
+    try {
+        const edit = await vscode.commands.executeCommand(
+            'vscode.executeDocumentRenameProvider',
+            position.uri,
+            position.position,
+            newName.trim()
+        );
+
+        if (edit && edit.size > 0) {
+            await vscode.workspace.applyEdit(edit);
+            vscode.window.showInformationMessage(`Renamed "${symbol}" to "${newName.trim()}".`);
+        } else {
+            vscode.window.showWarningMessage('Rename failed. LSP may not be available.');
+        }
+    } catch (error) {
+        vscode.window.showErrorMessage(`Rename failed: ${error.message}`);
     }
 }
 

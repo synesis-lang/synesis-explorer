@@ -1,6 +1,6 @@
 # Synesis Explorer
 
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](CHANGELOG.md)
 [![VSCode](https://img.shields.io/badge/VSCode-%3E%3D1.60.0-blue.svg)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -16,6 +16,20 @@ Synesis Explorer provides a comprehensive set of tools for working with the Syne
 
 ## Features
 
+### LSP Integration
+
+Full Language Server Protocol support for enhanced editing and navigation.
+
+- **Diagnostics**: Real-time syntax error detection with squiggles
+- **Semantic Highlighting**: Context-aware colorization for keywords, bibrefs, fields, and codes
+- **Hover Information**: Contextual info for `@bibref`, fields, and codes
+- **Go to Definition**: `Ctrl+Click` on `@bibref` or code to jump to definition
+- **Autocomplete**: `@bibrefs`, ontology codes, and template fields
+- **Rename Symbol**: `F2` to rename codes or references across all files
+- **Inlay Hints**: Author and year displayed inline after `@bibref`
+- **Document Symbols**: Outline view with SOURCE/ITEM/ONTOLOGY hierarchy
+- Automatic fallback to local regex parsing when LSP is unavailable
+
 ### Reference Explorer
 
 Browse all bibliographic references (`SOURCE @bibref`) in your workspace with item counts.
@@ -23,6 +37,7 @@ Browse all bibliographic references (`SOURCE @bibref`) in your workspace with it
 - Lists all `SOURCE` blocks with their `@bibref` identifiers
 - Shows the number of `ITEM` blocks for each reference
 - Click to navigate directly to the source location
+- Right-click to rename references across all files (requires LSP)
 - Filter references by name
 - Auto-refresh when files are saved
 
@@ -33,6 +48,9 @@ Navigate through all codes defined in your synthesis files.
 - Lists values from `CODE` fields
 - Extracts codes from `CHAIN` fields
 - Template-aware: adapts to your project's field definitions
+- Differentiated icons for ontology-defined codes vs. usage-only codes
+- Right-click to go to definition in ontology (requires LSP)
+- Right-click to rename codes across all files (requires LSP)
 - Filter codes by name
 - Click to jump to code usage
 
@@ -169,6 +187,7 @@ This will generate a `synesis-explorer-x.x.x.vsix` file in the project root.
 
 All commands are available via the Command Palette (`Ctrl+Shift+P`):
 
+- `Synesis: LSP Load Project` - Manually load/reload the project in the LSP server
 - `Synesis: Show Relation Graph` - Open the graph viewer
 - `Synesis: Show Abstract` - Open the abstract viewer
 - `Refresh References` - Re-scan reference list
@@ -179,6 +198,12 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`):
 - `Filter Relations` - Filter by relation component
 - `Refresh Ontology Topics` - Re-scan ontology topics
 - `Filter Ontology Topics` - Filter by topic name
+
+Context menu commands (right-click in tree views):
+
+- `Go to Definition` - Navigate to code definition in `.syno` (Code Explorer)
+- `Rename Code` - Rename a code across all files (Code Explorer)
+- `Rename Reference` - Rename a reference across all files (Reference Explorer)
 
 ## Configuration
 
@@ -216,6 +241,10 @@ Synesis-Explorer/
 │   │   ├── projectLoader.js
 │   │   ├── workspaceScanner.js
 │   │   └── fieldRegistry.js
+│   ├── lsp/               # LSP client
+│   │   └── synesisClient.js
+│   ├── services/          # Data services
+│   │   └── dataService.js # Adapter: LSP vs local regex
 │   ├── parsers/           # File parsers
 │   │   ├── synesisParser.js
 │   │   ├── ontologyParser.js
@@ -231,6 +260,7 @@ Synesis-Explorer/
 │   │   ├── graphViewer.js
 │   │   └── abstractViewer.js
 │   └── utils/
+│       └── mermaidUtils.js
 ├── syntaxes/              # TextMate grammars
 ├── themes/                # Color themes
 ├── icons/                 # File icons
@@ -244,6 +274,7 @@ Synesis-Explorer/
 ## Dependencies
 
 - [bibtex-parse-js](https://www.npmjs.com/package/bibtex-parse-js) - BibTeX parser
+- [vscode-languageclient](https://www.npmjs.com/package/vscode-languageclient) - LSP client for VSCode (v9.x)
 
 ## Contributing
 

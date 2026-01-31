@@ -1,6 +1,6 @@
 # Synesis Explorer
 
-[![Versão](https://img.shields.io/badge/versão-0.3.0-blue.svg)](CHANGELOG.md)
+[![Versão](https://img.shields.io/badge/versão-0.4.0-blue.svg)](CHANGELOG.md)
 [![VSCode](https://img.shields.io/badge/VSCode-%3E%3D1.60.0-blue.svg)](https://code.visualstudio.com/)
 [![Licença](https://img.shields.io/badge/licença-MIT-green.svg)](LICENSE)
 
@@ -16,6 +16,20 @@ O Synesis Explorer fornece um conjunto abrangente de ferramentas para trabalhar 
 
 ## Funcionalidades
 
+### Integração LSP
+
+Suporte completo ao Language Server Protocol para edição e navegação avançadas.
+
+- **Diagnósticos**: Detecção de erros de sintaxe em tempo real com sublinhados
+- **Realce Semântico**: Colorização contextual para keywords, bibrefs, campos e códigos
+- **Hover**: Informações contextuais para `@bibref`, campos e códigos
+- **Ir para Definição**: `Ctrl+Click` em `@bibref` ou código para ir à definição
+- **Autocompletar**: `@bibrefs`, códigos da ontologia e campos do template
+- **Renomear Símbolo**: `F2` para renomear códigos ou referências em todos os arquivos
+- **Inlay Hints**: Autor e ano exibidos inline após `@bibref`
+- **Símbolos do Documento**: Outline view com hierarquia SOURCE/ITEM/ONTOLOGY
+- Fallback automático para parsing regex local quando o LSP não está disponível
+
 ### Reference Explorer (Explorador de Referências)
 
 Navegue por todas as referências bibliográficas (`SOURCE @bibref`) no seu workspace com contagem de itens.
@@ -23,6 +37,7 @@ Navegue por todas as referências bibliográficas (`SOURCE @bibref`) no seu work
 - Lista todos os blocos `SOURCE` com seus identificadores `@bibref`
 - Mostra o número de blocos `ITEM` para cada referência
 - Clique para navegar diretamente para a localização da fonte
+- Clique direito para renomear referências em todos os arquivos (requer LSP)
 - Filtre referências por nome
 - Atualização automática ao salvar arquivos
 
@@ -33,6 +48,9 @@ Navegue por todos os códigos definidos nos seus arquivos de síntese.
 - Lista valores de campos `CODE`
 - Extrai códigos de campos `CHAIN`
 - Consciente do template: adapta-se às definições de campo do seu projeto
+- Ícones diferenciados para códigos definidos na ontologia vs. apenas usados
+- Clique direito para ir à definição na ontologia (requer LSP)
+- Clique direito para renomear códigos em todos os arquivos (requer LSP)
 - Filtre códigos por nome
 - Clique para ir ao uso do código
 
@@ -169,6 +187,7 @@ Isso gerará um arquivo `synesis-explorer-x.x.x.vsix` na raiz do projeto.
 
 Todos os comandos estão disponíveis via Command Palette (`Ctrl+Shift+P`):
 
+- `Synesis: LSP Load Project` - Carregar/recarregar manualmente o projeto no servidor LSP
 - `Synesis: Show Relation Graph` - Abrir o visualizador de grafos
 - `Synesis: Show Abstract` - Abrir o visualizador de abstract
 - `Refresh References` - Re-escanear lista de referências
@@ -179,6 +198,12 @@ Todos os comandos estão disponíveis via Command Palette (`Ctrl+Shift+P`):
 - `Filter Relations` - Filtrar por componente de relação
 - `Refresh Ontology Topics` - Re-escanear tópicos de ontologia
 - `Filter Ontology Topics` - Filtrar por nome de tópico
+
+Comandos de menu de contexto (clique direito nas tree views):
+
+- `Go to Definition` - Navegar para definição do código no `.syno` (Code Explorer)
+- `Rename Code` - Renomear código em todos os arquivos (Code Explorer)
+- `Rename Reference` - Renomear referência em todos os arquivos (Reference Explorer)
 
 ## Configuração
 
@@ -216,6 +241,10 @@ Synesis-Explorer/
 │   │   ├── projectLoader.js
 │   │   ├── workspaceScanner.js
 │   │   └── fieldRegistry.js
+│   ├── lsp/               # Cliente LSP
+│   │   └── synesisClient.js
+│   ├── services/          # Serviços de dados
+│   │   └── dataService.js # Adapter: LSP vs regex local
 │   ├── parsers/           # Parsers de arquivo
 │   │   ├── synesisParser.js
 │   │   ├── ontologyParser.js
@@ -231,6 +260,7 @@ Synesis-Explorer/
 │   │   ├── graphViewer.js
 │   │   └── abstractViewer.js
 │   └── utils/
+│       └── mermaidUtils.js
 ├── syntaxes/              # Gramáticas TextMate
 ├── themes/                # Temas de cores
 ├── icons/                 # Ícones de arquivo
@@ -244,6 +274,7 @@ Synesis-Explorer/
 ## Dependências
 
 - [bibtex-parse-js](https://www.npmjs.com/package/bibtex-parse-js) - Parser BibTeX
+- [vscode-languageclient](https://www.npmjs.com/package/vscode-languageclient) - Cliente LSP para VSCode (v9.x)
 
 ## Contribuindo
 

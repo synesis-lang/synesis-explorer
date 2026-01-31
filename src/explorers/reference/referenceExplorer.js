@@ -6,27 +6,24 @@
  *     Mostra ocorrências e contagem de ITEMs por referência.
  *
  * Componentes principais:
- *     - scanWorkspace: Escaneia todos .syn e indexa referências
+ *     - refresh: Obtém dados via DataService (LSP ou regex local)
  *     - getTreeItem: Retorna TreeItem para renderização
  *     - getChildren: Hierarquia (refs -> ocorrências)
  *
  * Dependências críticas:
- *     - WorkspaceScanner: Busca arquivos .syn
- *     - SynesisParser: Parse de blocos SOURCE
+ *     - DataService: Adapter LSP/local para dados normalizados
  *
  * Exemplo de uso:
- *     const explorer = new ReferenceExplorer(scanner);
+ *     const explorer = new ReferenceExplorer(dataService);
  *     await explorer.refresh();
  *     // TreeView mostra refs com ocorrências
  */
 
 const vscode = require('vscode');
-const SynesisParser = require('../../parsers/synesisParser');
 
 class ReferenceExplorer {
-    constructor(workspaceScanner) {
-        this.scanner = workspaceScanner;
-        this.parser = new SynesisParser();
+    constructor(dataService) {
+        this.dataService = dataService;
         this.references = new Map(); // bibref -> [occurrences]
         this.filterText = '';
 
@@ -35,55 +32,22 @@ class ReferenceExplorer {
     }
 
     /**
-     * Escaneia workspace e atualiza índice de referências
+     * Obtém referências via DataService e atualiza índice
      */
     async refresh() {
         this.references.clear();
 
         try {
-            const synFiles = await this.scanner.findSynFiles();
+            const refs = await this.dataService.getReferences();
 
-            for (const fileUri of synFiles) {
-                await this._scanFile(fileUri);
+            for (const ref of refs) {
+                this.references.set(ref.bibref, ref.occurrences);
             }
 
             this._onDidChangeTreeData.fire();
         } catch (error) {
             console.error('Error scanning workspace:', error);
             vscode.window.showErrorMessage(`Failed to scan workspace: ${error.message}`);
-        }
-    }
-
-    /**
-     * Escaneia um arquivo .syn individual
-     * @private
-     */
-    async _scanFile(fileUri) {
-        try {
-            const content = await vscode.workspace.fs.readFile(fileUri);
-            const text = content.toString();
-            const filePath = fileUri.fsPath;
-
-            // Parse SOURCE blocks
-            const sources = this.parser.parseSourceBlocks(text, filePath);
-
-            for (const source of sources) {
-                // Contar ITEMs para esta referência no arquivo inteiro
-                const itemCount = this.parser.countItemsInSource(text, source.bibref);
-
-                // Adicionar ocorrência
-                if (!this.references.has(source.bibref)) {
-                    this.references.set(source.bibref, []);
-                }
-
-                this.references.get(source.bibref).push({
-                    file: filePath,
-                    line: source.line,
-                    itemCount: itemCount
-                });
-            }
-        } catch (error) {
-            console.error(`Error scanning file ${fileUri.fsPath}:`, error);
         }
     }
 

@@ -3,27 +3,23 @@
  *
  * Proposito:
  *     Exibe um grafo Mermaid com relacoes de CHAIN para uma referencia.
- *     Usa template para determinar campos CHAIN (simples ou qualificados).
+ *     Usa DataService para obter mermaidCode (LSP ou regex local).
  *
  * Componentes principais:
  *     - showGraph: Fluxo principal de exibicao
- *     - generateMermaidGraph: Gera codigo Mermaid
+ *     - showGraphPanel: Renderiza webview com Mermaid.js
  *
  * Dependencias criticas:
- *     - TemplateManager: carregamento do template
- *     - SynesisParser: parse de ITEMs
- *     - chainParser: extracao de codigos e relacoes
+ *     - DataService: Adapter LSP/local para mermaidCode
+ *     - SynesisParser: apenas para _findBibref (identifica bibref sob cursor)
  */
 
 const vscode = require('vscode');
 const SynesisParser = require('../parsers/synesisParser');
-const FieldRegistry = require('../core/fieldRegistry');
-const chainParser = require('../parsers/chainParser');
 
 class GraphViewer {
-    constructor(workspaceScanner, templateManager) {
-        this.scanner = workspaceScanner;
-        this.templateManager = templateManager;
+    constructor(dataService) {
+        this.dataService = dataService;
         this.parser = new SynesisParser();
         this.panel = null;
     }
@@ -41,188 +37,13 @@ class GraphViewer {
             return;
         }
 
-        const projectUri = await this.scanner.findProjectFile();
-        if (!projectUri) {
-            vscode.window.showWarningMessage('No project file found. Create a .synp to enable graphs.');
-            return;
-        }
-
-        const registry = await this.templateManager.loadTemplate(projectUri);
-        const info = this.templateManager.getTemplateInfo(projectUri);
-        const fieldRegistry = new FieldRegistry(registry);
-        const chainFields = fieldRegistry.getChainFields();
-        const hasChains = Boolean(info && info.fromTemplate && info.hasChainFields && chainFields.length > 0);
-
-        if (!hasChains) {
-            vscode.window.showWarningMessage('Template does not define CHAIN fields. Graph is unavailable.');
-            return;
-        }
-
-        const relations = await this._extractRelations(bibref, chainFields, registry);
-        if (relations.length === 0) {
+        const result = await this.dataService.getRelationGraph(bibref);
+        if (!result || !result.mermaidCode) {
             vscode.window.showWarningMessage(`No chain relations found for ${bibref}.`);
             return;
         }
 
-        const mermaidCode = this.generateMermaidGraph(bibref, relations);
-        if (!mermaidCode) {
-            vscode.window.showWarningMessage('Failed to generate graph.');
-            return;
-        }
-
-        this.showGraphPanel(bibref, mermaidCode);
-    }
-
-    async _extractRelations(bibref, chainFields, registry) {
-        const relations = [];
-        const synFiles = await this.scanner.findSynFiles();
-
-        for (const fileUri of synFiles) {
-            const content = await vscode.workspace.fs.readFile(fileUri);
-            const text = content.toString();
-            const filePath = fileUri.fsPath;
-
-            const items = this.parser.parseItems(text, filePath);
-            const filtered = items.filter(item => item.bibref === bibref);
-
-            for (const item of filtered) {
-                for (const fieldName of chainFields) {
-                    const chainValues = this._getChainValues(item, fieldName);
-                    if (chainValues.length === 0) {
-                        continue;
-                    }
-
-                    const fieldDef = registry[fieldName] || {};
-                    const chainTexts = chainValues.flatMap(value => this._splitChainValues(value));
-
-                    for (const chainText of chainTexts) {
-                        const parsed = chainParser.parseChain(chainText, fieldDef);
-                        for (let index = 0; index < parsed.relations.length; index += 1) {
-                            relations.push({
-                                from: parsed.codes[index],
-                                to: parsed.codes[index + 1],
-                                label: parsed.relations[index] || ''
-                            });
-                        }
-                    }
-                }
-            }
-        }
-
-        return relations;
-    }
-
-    _getChainValues(item, fieldName) {
-        if (!item || !fieldName) {
-            return [];
-        }
-
-        const values = this._extractFieldValues(item.blockContent, fieldName);
-        if (values.length > 0) {
-            return values;
-        }
-
-        if (item.fields && item.fields[fieldName]) {
-            return [item.fields[fieldName]];
-        }
-
-        return [];
-    }
-
-    _extractFieldValues(blockContent, fieldName) {
-        if (!blockContent) {
-            return [];
-        }
-
-        const values = [];
-        const lines = blockContent.split('\n');
-        let currentField = null;
-        let currentValue = [];
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) {
-                continue;
-            }
-
-            const fieldMatch = trimmed.match(/^([\p{L}\p{N}._-]+)\s*:\s*(.*)$/u);
-            if (fieldMatch) {
-                if (currentField === fieldName) {
-                    values.push(currentValue.join('\n').trim());
-                }
-
-                currentField = fieldMatch[1];
-                currentValue = [fieldMatch[2]];
-                continue;
-            }
-
-            if (currentField === fieldName) {
-                currentValue.push(trimmed);
-            }
-        }
-
-        if (currentField === fieldName) {
-            values.push(currentValue.join('\n').trim());
-        }
-
-        return values.filter(Boolean);
-    }
-
-    _splitChainValues(value) {
-        const rawLines = String(value || '')
-            .split(/\r?\n/)
-            .map(line => line.trim())
-            .filter(Boolean);
-
-        if (rawLines.length <= 1) {
-            return rawLines;
-        }
-
-        const hasContinuation = rawLines.some(line => line.endsWith('->') || line.startsWith('->'));
-        if (hasContinuation) {
-            return [rawLines.join(' ')];
-        }
-
-        return rawLines;
-    }
-
-    generateMermaidGraph(reference, relations) {
-        if (!relations || relations.length === 0) {
-            return null;
-        }
-
-        let mermaid = 'flowchart LR\n';
-        mermaid += '    classDef enable fill:#dcfce7,stroke:#16a34a,stroke-width:3px,color:#166534,rx:12,ry:12\n';
-        mermaid += '    classDef constrain fill:#fee2e2,stroke:#dc2626,stroke-width:3px,color:#991b1b,rx:12,ry:12\n';
-        mermaid += '    classDef node fill:#dbeafe,stroke:#3b82f6,stroke-width:2px,color:#1e40af,rx:12,ry:12\n';
-
-        const nodeIds = new Map();
-        const definedNodes = new Set();
-
-        for (const relation of relations) {
-            const fromId = ensureNodeId(nodeIds, relation.from);
-            const toId = ensureNodeId(nodeIds, relation.to);
-            const label = escapeMermaidLabel(relation.label);
-            const nodeClass = getNodeClass(relation.label);
-
-            if (!definedNodes.has(fromId)) {
-                mermaid += `    ${fromId}["${escapeMermaidLabel(relation.from)}"]:::${nodeClass}\n`;
-                definedNodes.add(fromId);
-            }
-
-            if (!definedNodes.has(toId)) {
-                mermaid += `    ${toId}["${escapeMermaidLabel(relation.to)}"]:::${nodeClass}\n`;
-                definedNodes.add(toId);
-            }
-
-            if (label) {
-                mermaid += `    ${fromId} -->|"${label}"| ${toId}\n`;
-            } else {
-                mermaid += `    ${fromId} --> ${toId}\n`;
-            }
-        }
-
-        return mermaid;
+        this.showGraphPanel(bibref, result.mermaidCode);
     }
 
     showGraphPanel(reference, mermaidCode) {
@@ -547,46 +368,6 @@ function escapeHtml(value) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
-}
-
-function ensureNodeId(map, name) {
-    if (map.has(name)) {
-        return map.get(name);
-    }
-
-    let base = String(name || '').trim().replace(/[^\p{L}\p{N}_]/gu, '_');
-    if (!base) {
-        base = 'node';
-    }
-
-    if (/^\d/.test(base)) {
-        base = `n_${base}`;
-    }
-
-    let id = base;
-    let counter = 1;
-    while ([...map.values()].includes(id)) {
-        counter += 1;
-        id = `${base}_${counter}`;
-    }
-
-    map.set(name, id);
-    return id;
-}
-
-function getNodeClass(label) {
-    const text = String(label || '').toLowerCase();
-    if (text.includes('enable') || text.includes('habilita')) {
-        return 'enable';
-    }
-    if (text.includes('constrain') || text.includes('restringe')) {
-        return 'constrain';
-    }
-    return 'node';
-}
-
-function escapeMermaidLabel(value) {
-    return String(value || '').replace(/"/g, '\\"');
 }
 
 module.exports = GraphViewer;

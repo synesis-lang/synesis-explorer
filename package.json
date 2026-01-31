@@ -2,7 +2,7 @@
   "name": "synesis-explorer",
   "displayName": "Synesis Explorer",
   "description": "VSCode extension for exploring Synesis knowledge synthesis files",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "synesis",
   "repository": {
     "type": "git",
@@ -168,6 +168,19 @@
       {
         "command": "synesis.openLocation",
         "title": "Open Location"
+      },
+      {
+        "command": "synesis.code.goToDefinition",
+        "title": "Go to Definition",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "synesis.code.rename",
+        "title": "Rename Code"
+      },
+      {
+        "command": "synesis.reference.rename",
+        "title": "Rename Reference"
       }
     ],
     "keybindings": [
@@ -230,6 +243,23 @@
           "command": "synesis.ontology.annotation.refresh",
           "when": "view == synesisOntologyAnnotationExplorer && synesis.hasOntologyAnnotations && synesis.activeFileKind == syn",
           "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "synesis.code.goToDefinition",
+          "when": "view == synesisCodeExplorer && viewItem == code",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.code.rename",
+          "when": "view == synesisCodeExplorer && viewItem == code",
+          "group": "7_modification"
+        },
+        {
+          "command": "synesis.reference.rename",
+          "when": "view == synesisReferenceExplorer && viewItem == reference",
+          "group": "7_modification"
         }
       ]
     },

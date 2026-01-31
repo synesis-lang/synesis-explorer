@@ -6,27 +6,19 @@
  *     Agrupa ocorrencias por codigo e permite navegacao.
  *
  * Componentes principais:
- *     - refresh: Escaneia workspace e atualiza o indice
+ *     - refresh: Obtém dados via DataService (LSP ou regex local)
  *     - getChildren: Retorna lista de codigos ou ocorrencias
  *
  * Dependencias criticas:
- *     - TemplateManager: carregamento do template
- *     - SynesisParser: parse de ITEMs
- *     - chainParser: extracao de codigos em chains
+ *     - DataService: Adapter LSP/local para dados normalizados
  */
 
 const vscode = require('vscode');
-const SynesisParser = require('../../parsers/synesisParser');
-const FieldRegistry = require('../../core/fieldRegistry');
-const chainParser = require('../../parsers/chainParser');
-const positionUtils = require('../../utils/positionUtils');
 
 class CodeExplorer {
-    constructor(workspaceScanner, templateManager) {
-        this.scanner = workspaceScanner;
-        this.templateManager = templateManager;
-        this.parser = new SynesisParser();
-        this.codes = new Map(); // code -> [occurrences]
+    constructor(dataService) {
+        this.dataService = dataService;
+        this.codes = new Map(); // code -> { usageCount, ontologyDefined, occurrences }
         this.filterText = '';
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
@@ -34,98 +26,26 @@ class CodeExplorer {
     }
 
     /**
-     * Escaneia workspace e atualiza indice de codigos
+     * Obtém códigos via DataService e atualiza índice
      */
     async refresh() {
         this.codes.clear();
 
         try {
-            const projectUri = await this.scanner.findProjectFile();
-            const registry = await this.templateManager.loadTemplate(projectUri);
-            const fieldRegistry = new FieldRegistry(registry);
-            const codeFields = fieldRegistry.getCodeFields();
-            const chainFields = fieldRegistry.getChainFields();
-            const synFiles = await this.scanner.findSynFiles();
+            const codes = await this.dataService.getCodes();
 
-            for (const fileUri of synFiles) {
-                await this._scanFile(fileUri, codeFields, chainFields, registry);
+            for (const entry of codes) {
+                this.codes.set(entry.code, {
+                    usageCount: entry.usageCount,
+                    ontologyDefined: entry.ontologyDefined,
+                    occurrences: entry.occurrences
+                });
             }
 
             this._onDidChangeTreeData.fire();
         } catch (error) {
             console.error('Error scanning codes:', error);
             vscode.window.showErrorMessage(`Failed to scan codes: ${error.message}`);
-        }
-    }
-
-    /**
-     * Escaneia um arquivo .syn individual
-     * @private
-     */
-    async _scanFile(fileUri, codeFields, chainFields, registry) {
-        const content = await vscode.workspace.fs.readFile(fileUri);
-        const text = content.toString();
-        const filePath = fileUri.fsPath;
-        const lineOffsets = positionUtils.buildLineOffsets(text);
-
-        const items = this.parser.parseItems(text, filePath);
-
-        for (const item of items) {
-            for (const fieldName of codeFields) {
-                if (item.fields[fieldName]) {
-                    const codes = this._extractCodes(item.fields[fieldName]);
-                    for (const code of codes) {
-                        const position = this._findTokenPosition(item, fieldName, code, lineOffsets);
-                        const line = position ? position.line : item.line;
-                        const column = position ? position.column : 0;
-                        this._addCodes([code], filePath, line, column, 'code', fieldName);
-                    }
-                }
-            }
-
-            for (const fieldName of chainFields) {
-                if (item.fields[fieldName]) {
-                    const fieldDef = registry[fieldName] || {};
-                    const parsed = chainParser.parseChain(item.fields[fieldName], fieldDef);
-                    for (const code of parsed.codes) {
-                        const position = this._findTokenPosition(item, fieldName, code, lineOffsets);
-                        const line = position ? position.line : item.line;
-                        const column = position ? position.column : 0;
-                        this._addCodes([code], filePath, line, column, 'chain', fieldName);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * Extrai codigos de um campo CODE
-     * @private
-     */
-    _extractCodes(value) {
-        return value
-            .split(',')
-            .map(item => item.trim())
-            .filter(Boolean);
-    }
-
-    /**
-     * Registra ocorrencias para cada codigo
-     * @private
-     */
-    _addCodes(codes, filePath, line, column, context, fieldName) {
-        for (const code of codes) {
-            if (!this.codes.has(code)) {
-                this.codes.set(code, []);
-            }
-
-            this.codes.get(code).push({
-                file: filePath,
-                line,
-                column,
-                context,
-                field: fieldName
-            });
         }
     }
 
@@ -138,11 +58,11 @@ class CodeExplorer {
             const items = [];
             const filter = this.filterText;
 
-            for (const [code, occurrences] of this.codes.entries()) {
+            for (const [code, data] of this.codes.entries()) {
                 if (filter && !code.toLowerCase().includes(filter)) {
                     continue;
                 }
-                items.push(new CodeTreeItem(code, occurrences));
+                items.push(new CodeTreeItem(code, data));
             }
 
             return items.sort((a, b) => a.code.localeCompare(b.code));
@@ -167,68 +87,21 @@ class CodeExplorer {
     getFilter() {
         return this.filterText;
     }
-
-    _findTokenPosition(item, fieldName, token, lineOffsets) {
-        if (!item.blockContent || typeof item.blockOffset !== 'number') {
-            return null;
-        }
-
-        const fieldInfo = this._findFieldValueInfo(item.blockContent, fieldName);
-        if (!fieldInfo) {
-            return null;
-        }
-
-        const tokenOffset = this._findTokenOffset(fieldInfo.value, token);
-        if (tokenOffset === null) {
-            return null;
-        }
-
-        const absoluteOffset = item.blockOffset + fieldInfo.valueStart + tokenOffset;
-        return positionUtils.getLineColumn(lineOffsets, absoluteOffset);
-    }
-
-    _findFieldValueInfo(blockContent, fieldName) {
-        const escapedName = this._escapeRegex(fieldName);
-        const pattern = new RegExp(
-            `^\\s*${escapedName}\\s*:\\s*([\\s\\S]*?)(?=^\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*(?![\\s\\S]))`,
-            'gmu'
-        );
-
-        const match = pattern.exec(blockContent);
-        if (!match) {
-            return null;
-        }
-
-        const value = match[1];
-        const valueStart = match.index + match[0].length - value.length;
-
-        return { value, valueStart };
-    }
-
-    _findTokenOffset(value, token) {
-        const escaped = this._escapeRegex(token);
-        const pattern = new RegExp(`(^|[^\\p{L}\\p{N}._-])(${escaped})(?=$|[^\\p{L}\\p{N}._-])`, 'u');
-        const match = pattern.exec(value);
-        if (!match) {
-            return null;
-        }
-
-        return match.index + match[1].length;
-    }
-
-    _escapeRegex(text) {
-        return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
 }
 
 class CodeTreeItem extends vscode.TreeItem {
-    constructor(code, occurrences) {
-        super(code, vscode.TreeItemCollapsibleState.Collapsed);
+    constructor(code, data) {
+        const hasChildren = data.occurrences.length > 0;
+        const state = hasChildren
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None;
+
+        super(code, state);
 
         this.code = code;
-        this.occurrences = occurrences;
-        this.description = `${occurrences.length} occurrence(s)`;
-        this.iconPath = new vscode.ThemeIcon('symbol-key');
+        this.occurrences = data.occurrences;
+        this.description = `${data.usageCount} occurrence(s)`;
+        this.iconPath = new vscode.ThemeIcon(data.ontologyDefined ? 'symbol-key' : 'symbol-variable');
         this.contextValue = 'code';
     }
 }

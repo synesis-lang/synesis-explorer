@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m synesis_lsp:*)",
+      "Bash(node esbuild.js:*)",
+      "Bash(findstr:*)",
+      "Bash(python -c:*)",
+      "Bash(node -e:*)",
+      "Bash(where synesis-lsp)",
+      "Bash(synesis-lsp:*)",
+      "Bash(npm run build:*)",
+      "Bash(powershell:*)"
+    ]
+  }
+}
