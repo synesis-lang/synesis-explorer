@@ -1,3 +1,4 @@
+const path = require('path');
 const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
 
 class SynesisLspClient {
@@ -14,9 +15,13 @@ class SynesisLspClient {
             return this.readyPromise || Promise.resolve();
         }
 
+        const normalizedPath = String(pythonPath || '').trim().replace(/^"(.*)"$/, '$1').replace(/^'(.*)'$/, '$1');
+        const baseName = path.basename(normalizedPath).toLowerCase();
+        const isSynesisLsp = baseName === 'synesis-lsp' || baseName === 'synesis-lsp.exe';
+
         const serverOptions = {
-            command: pythonPath,
-            args: ['-m', 'synesis_lsp'],
+            command: normalizedPath || pythonPath,
+            args: isSynesisLsp ? [] : ['-m', 'synesis_lsp'],
             transport: TransportKind.stdio
         };
 

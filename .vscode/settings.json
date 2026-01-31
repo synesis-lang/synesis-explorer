@@ -1,4 +1,4 @@
 {
     "editor.wordWrap": "on",
-    "synesisExplorer.lsp.pythonPath": "C:\\Users\\DeBritto\\AppData\\Local\\Programs\\Python\\Python312\\python.exe"
+    "synesisExplorer.lsp.pythonPath": "synesis-lsp"
 }

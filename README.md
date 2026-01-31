@@ -182,6 +182,17 @@ All commands are available via the Command Palette (`Ctrl+Shift+P`):
 
 ## Configuration
 
+### LSP Server
+
+By default the extension starts the LSP with `python -m synesis_lsp`. If you have the
+standalone executable, point the setting to it instead.
+
+```json
+{
+  "synesisExplorer.lsp.pythonPath": "synesis-lsp"
+}
+```
+
 ### Activating File Icons
 
 1. Open VSCode Settings
