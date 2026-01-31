@@ -30,6 +30,7 @@
     "onCommand:synesis.showGraph",
     "onCommand:synesis.showAbstract",
     "onCommand:synesis.openLocation",
+    "onCommand:synesis.lsp.loadProject",
     "onLanguage:synesis"
   ],
   "main": "./dist/extension.js",
@@ -107,6 +108,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "synesis.lsp.loadProject",
+        "title": "Synesis: LSP Load Project"
+      },
       {
         "command": "synesis.reference.refresh",
         "title": "Refresh References",
@@ -227,6 +232,21 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Synesis Explorer",
+      "properties": {
+        "synesisExplorer.lsp.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable Synesis LSP integration."
+        },
+        "synesisExplorer.lsp.pythonPath": {
+          "type": "string",
+          "default": "python",
+          "description": "Python executable path used to start the Synesis LSP server."
+        }
+      }
     }
   },
   "scripts": {
@@ -240,7 +260,8 @@
     "vscode:prepublish": "npm run build"
   },
   "dependencies": {
-    "bibtex-parse-js": "^0.0.24"
+    "bibtex-parse-js": "^0.0.24",
+    "vscode-languageclient": "^9.0.0"
   },
   "devDependencies": {
     "@types/vscode": "^1.60.0",

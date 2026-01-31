@@ -23,6 +23,7 @@
 
 const path = require('path');
 const vscode = require('vscode');
+const SynesisLspClient = require('./src/lsp/synesisClient');
 
 // Core
 const TemplateManager = require('./src/core/templateManager');
@@ -39,6 +40,10 @@ const OntologyAnnotationExplorer = require('./src/explorers/ontology/ontologyAnn
 const GraphViewer = require('./src/viewers/graphViewer');
 const AbstractViewer = require('./src/viewers/abstractViewer');
 
+let lspClient;
+let lspStatusItem;
+let lspLoadTimer;
+
 /**
  * @param {vscode.ExtensionContext} context
  */
@@ -50,6 +55,23 @@ function activate(context) {
 
     const editorConfig = vscode.workspace.getConfiguration('editor');
     editorConfig.update('wordWrap', 'on', vscode.ConfigurationTarget.Workspace);
+
+    // LSP setup
+    const lspConfig = vscode.workspace.getConfiguration('synesisExplorer');
+    const lspEnabled = lspConfig.get('lsp.enabled', true);
+    const pythonPath = lspConfig.get('lsp.pythonPath', 'python');
+
+    lspStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+    lspStatusItem.tooltip = 'Synesis LSP';
+    lspStatusItem.show();
+    context.subscriptions.push(lspStatusItem);
+
+    if (lspEnabled) {
+        lspClient = new SynesisLspClient();
+        startLspClient(lspClient, pythonPath);
+    } else {
+        setLspStatus('disabled');
+    }
 
     // Shared template manager
     const templateManager = new TemplateManager();
@@ -90,6 +112,81 @@ function activate(context) {
     const graphViewer = new GraphViewer(workspaceScanner, templateManager);
 
     // Register commands
+    const refreshAllExplorers = () => {
+        referenceExplorer.refresh();
+        codeExplorer.refresh();
+        relationExplorer.refresh();
+        ontologyExplorer.refresh();
+        ontologyAnnotationExplorer.refresh();
+    };
+
+    const runLspLoadProject = async ({ showProgress, showErrorMessage }) => {
+        if (!lspClient || !lspClient.isReady()) {
+            setLspStatus('error');
+            if (showErrorMessage) {
+                vscode.window.showErrorMessage('Synesis LSP is not ready.');
+            }
+            return;
+        }
+
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri?.fsPath;
+        if (!workspaceRoot) {
+            setLspStatus('error');
+            if (showErrorMessage) {
+                vscode.window.showErrorMessage('No workspace folder found to load project.');
+            }
+            return;
+        }
+
+        setLspStatus('loading');
+        try {
+            const loadRequest = () => lspClient.sendRequest('synesis/loadProject', { workspaceRoot });
+            const result = showProgress
+                ? await vscode.window.withProgress(
+                    {
+                        location: vscode.ProgressLocation.Window,
+                        title: 'Synesis LSP: Loading project'
+                    },
+                    loadRequest
+                )
+                : await loadRequest();
+
+            if (result && result.success) {
+                setLspStatus('ready', result.stats);
+                refreshAllExplorers();
+            } else {
+                setLspStatus('error');
+                if (showErrorMessage) {
+                    const message = result && result.error ? result.error : 'Unknown error from LSP.';
+                    vscode.window.showErrorMessage(`Synesis LSP load failed: ${message}`);
+                }
+            }
+        } catch (error) {
+            setLspStatus('error');
+            if (showErrorMessage) {
+                vscode.window.showErrorMessage(`Synesis LSP load failed: ${error.message}`);
+            }
+        }
+    };
+
+    const scheduleLspLoadProject = () => {
+        if (!lspClient || !lspClient.isReady()) {
+            return;
+        }
+        if (lspLoadTimer) {
+            clearTimeout(lspLoadTimer);
+        }
+        lspLoadTimer = setTimeout(() => {
+            runLspLoadProject({ showProgress: false, showErrorMessage: false });
+        }, 1000);
+    };
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.lsp.loadProject', async () => {
+            await runLspLoadProject({ showProgress: true, showErrorMessage: true });
+        })
+    );
+
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.reference.refresh', () => {
             referenceExplorer.refresh();
@@ -280,15 +377,20 @@ function activate(context) {
         })
     );
 
+    context.subscriptions.push(
+        vscode.workspace.onDidSaveTextDocument(document => {
+            const ext = path.extname(document.uri.fsPath || '').toLowerCase();
+            if (ext === '.syn' || ext === '.syno' || ext === '.synp' || ext === '.synt' || ext === '.bib') {
+                scheduleLspLoadProject();
+            }
+        })
+    );
+
     updateActiveFileKind(vscode.window.activeTextEditor);
 
     // Initial scan (delayed to avoid blocking startup)
     setTimeout(() => {
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
+        refreshAllExplorers();
     }, 1000);
 
     context.subscriptions.push(referenceTreeView);
@@ -317,6 +419,10 @@ async function openLocation(filePath, line, column = 0) {
 
 function deactivate() {
     console.log('Synesis Explorer is now deactivated');
+    if (lspClient) {
+        lspClient.stop();
+        lspClient = undefined;
+    }
 }
 
 /**
@@ -340,6 +446,46 @@ function updateActiveFileKind(editor) {
     }
 
     vscode.commands.executeCommand('setContext', 'synesis.activeFileKind', 'other');
+}
+
+async function startLspClient(client, pythonPath) {
+    try {
+        setLspStatus('loading');
+        await client.start(pythonPath);
+        setLspStatus('ready');
+    } catch (error) {
+        setLspStatus('error');
+        vscode.window.showErrorMessage(`Failed to start Synesis LSP: ${error.message}`);
+    }
+}
+
+function setLspStatus(state, stats) {
+    if (!lspStatusItem) {
+        return;
+    }
+
+    if (state === 'disabled') {
+        lspStatusItem.text = '$(circle-slash) LSP Disabled';
+        return;
+    }
+
+    if (state === 'loading') {
+        lspStatusItem.text = '$(sync) LSP Loading';
+        return;
+    }
+
+    if (state === 'error') {
+        lspStatusItem.text = '$(alert) LSP Error';
+        return;
+    }
+
+    if (state === 'ready') {
+        if (stats && typeof stats.source_count === 'number' && typeof stats.item_count === 'number') {
+            lspStatusItem.text = `$(check) Ready (${stats.source_count} sources, ${stats.item_count} items)`;
+        } else {
+            lspStatusItem.text = '$(check) LSP Ready';
+        }
+    }
 }
 
 module.exports = {
