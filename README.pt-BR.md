@@ -209,8 +209,8 @@ Comandos de menu de contexto (clique direito nas tree views):
 
 ### Servidor LSP
 
-Por padrão a extensão inicia o LSP com `python -m synesis_lsp`. Se você tem o
-executável standalone, aponte a configuração para ele.
+Por padrão a extensão inicia o LSP com `synesis-lsp` a partir do PATH. Se você tem o
+executável standalone em outro local, aponte a configuração para ele.
 
 ```json
 {

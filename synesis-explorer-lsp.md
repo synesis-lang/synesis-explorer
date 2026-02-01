@@ -11,7 +11,7 @@ com menor risco de integracao, especificando contratos de dados e fluxo de estad
 ## Checklist anti-alucinacao (VALIDADO)
 
 1. ✅ O LSP server **retorna** `{ success: boolean, error?: string }` em custom requests.
-2. ✅ Modulo para iniciar o LSP: `python -m synesis_lsp`.
+2. ✅ Executável para iniciar o LSP: `synesis-lsp`.
 3. ✅ LanguageId: `synesis` (definido em `package.json` da extensao `vscode-extension/`).
 4. ✅ Custom requests (`synesis/*`): `location.line` e `location.column` sao **1-based**.
    Features LSP padrao (`textDocument/*`): posicoes sao **0-based** (conforme protocolo).
@@ -291,14 +291,14 @@ Implemente a infraestrutura do Cliente LSP no `synesis-explorer`.
 CONTEXTO:
 - O servidor LSP e feito em Python (pygls 1.x) e usa stdio.
 - O servidor retorna `{ success: boolean, error?: string }` em custom requests.
-- O modulo para iniciar: `python -m synesis_lsp`.
+- O executável para iniciar: `synesis-lsp`.
 - O wrapper deve residir em `src/lsp/synesisClient.js`.
 
 REQUISITOS:
 1. Dependencia: adicione `vscode-languageclient` (^9.x) ao package.json.
 2. Wrapper Class: `SynesisLspClient` com `start()`, `stop()`, `isReady()`,
    `sendRequest(method, params)` e um getter para ultimo `loadProject`.
-3. ServerOptions: comando `python -m synesis_lsp` (stdio),
+3. ServerOptions: comando `synesis-lsp` (stdio),
    configuravel via `synesisExplorer.lsp.pythonPath`.
 4. ClientOptions: `documentSelector: [{ language: 'synesis' }]`.
 5. Comando `synesis.lsp.loadProject`:

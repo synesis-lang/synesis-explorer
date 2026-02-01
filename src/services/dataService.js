@@ -34,8 +34,38 @@ class LspDataProvider {
         this.lspClient = lspClient;
     }
 
+    _isMethodNotFound(error) {
+        return Boolean(error && (error.code === -32601 || /Method Not Found/i.test(error.message)));
+    }
+
+    async _sendRequestWithFallback(primaryMethod, params, fallbackMethods = []) {
+        try {
+            return await this.lspClient.sendRequest(primaryMethod, params);
+        } catch (error) {
+            if (!this._isMethodNotFound(error) || fallbackMethods.length === 0) {
+                throw error;
+            }
+
+            for (const method of fallbackMethods) {
+                try {
+                    return await this.lspClient.sendRequest(method, params);
+                } catch (fallbackError) {
+                    if (!this._isMethodNotFound(fallbackError)) {
+                        throw fallbackError;
+                    }
+                }
+            }
+
+            throw error;
+        }
+    }
+
     async getReferences(workspaceRoot) {
-        const result = await this.lspClient.sendRequest('synesis/getReferences', { workspaceRoot });
+        const result = await this._sendRequestWithFallback(
+            'synesis/getReferences',
+            { workspaceRoot },
+            ['synesis/get_references']
+        );
         if (!result || !result.success) {
             return null;
         }
@@ -59,7 +89,11 @@ class LspDataProvider {
     }
 
     async getCodes(workspaceRoot) {
-        const result = await this.lspClient.sendRequest('synesis/getCodes', { workspaceRoot });
+        const result = await this._sendRequestWithFallback(
+            'synesis/getCodes',
+            { workspaceRoot },
+            ['synesis/get_codes']
+        );
         if (!result || !result.success) {
             return null;
         }
@@ -73,7 +107,11 @@ class LspDataProvider {
     }
 
     async getRelations(workspaceRoot) {
-        const result = await this.lspClient.sendRequest('synesis/getRelations', { workspaceRoot });
+        const result = await this._sendRequestWithFallback(
+            'synesis/getRelations',
+            { workspaceRoot },
+            ['synesis/get_relations']
+        );
         if (!result || !result.success) {
             return null;
         }
@@ -100,7 +138,11 @@ class LspDataProvider {
         if (bibref) {
             params.bibref = bibref;
         }
-        const result = await this.lspClient.sendRequest('synesis/getRelationGraph', params);
+        const result = await this._sendRequestWithFallback(
+            'synesis/getRelationGraph',
+            params,
+            ['synesis/get_relation_graph']
+        );
         if (!result || !result.success) {
             return null;
         }
@@ -121,7 +163,8 @@ class LocalRegexProvider {
 
     async getReferences() {
         const refs = new Map();
-        const synFiles = await this.scanner.findSynFiles();
+        const projectUri = await this.scanner.findProjectFile();
+        const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             try {
@@ -158,7 +201,7 @@ class LocalRegexProvider {
         const fieldRegistry = new FieldRegistry(registry);
         const codeFields = fieldRegistry.getCodeFields();
         const chainFields = fieldRegistry.getChainFields();
-        const synFiles = await this.scanner.findSynFiles();
+        const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             try {
@@ -222,7 +265,7 @@ class LocalRegexProvider {
             return [];
         }
 
-        const synFiles = await this.scanner.findSynFiles();
+        const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             try {
@@ -292,7 +335,7 @@ class LocalRegexProvider {
         }
 
         const relations = [];
-        const synFiles = await this.scanner.findSynFiles();
+        const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             try {
@@ -481,10 +524,15 @@ class LocalRegexProvider {
 // ---------------------------------------------------------------------------
 
 class DataService {
-    constructor({ lspClient, workspaceScanner, templateManager }) {
+    constructor({ lspClient, workspaceScanner, templateManager, onLspIncompatible }) {
         this.lspClient = lspClient || null;
         this.lspProvider = lspClient ? new LspDataProvider(lspClient) : null;
         this.localProvider = new LocalRegexProvider(workspaceScanner, templateManager);
+        this.unsupportedMethods = new Set();
+        this.warnedUnsupported = false;
+        this.onLspIncompatible = typeof onLspIncompatible === 'function' ? onLspIncompatible : null;
+        this._lspNullCount = 0;
+        this._lspNullWarned = false;
     }
 
     async getReferences() {
@@ -504,7 +552,7 @@ class DataService {
     }
 
     async _tryLspThenLocal(method, ...args) {
-        if (this.lspClient && this.lspClient.isReady()) {
+        if (this.lspClient && this.lspClient.isReady() && !this.unsupportedMethods.has(method)) {
             try {
                 const workspaceRoot = this._getWorkspaceRoot();
                 const result = await this.lspProvider[method](workspaceRoot, ...args);
@@ -512,14 +560,75 @@ class DataService {
                     return result;
                 }
                 console.warn(`DataService: LSP ${method} returned null, falling back to local`);
+                this._trackLspNull();
             } catch (error) {
+                if (this._isMethodNotFound(error)) {
+                    this.unsupportedMethods.add(method);
+                    this._warnUnsupported(method, error);
+                }
                 console.warn(`DataService: LSP ${method} failed, falling back to local:`, error.message);
             }
         }
         return this.localProvider[method](...args);
     }
 
+    _trackLspNull() {
+        if (this._lspNullWarned) {
+            return;
+        }
+        this._lspNullCount += 1;
+        if (this._lspNullCount >= 3 && this.onLspIncompatible) {
+            this._lspNullWarned = true;
+            this.onLspIncompatible();
+        }
+    }
+
+    _isMethodNotFound(error) {
+        return Boolean(error && (error.code === -32601 || /Method Not Found/i.test(error.message)));
+    }
+
+    _warnUnsupported(method, error) {
+        if (this.warnedUnsupported) {
+            return;
+        }
+
+        this.warnedUnsupported = true;
+        if (this.onLspIncompatible) {
+            this.onLspIncompatible();
+        }
+        const lspMethod = this._resolveLspMethodName(method);
+        const message = `Synesis LSP does not support "${lspMethod}". ` +
+            'Using local parsers instead. Update synesis-lsp to v1.0.0+ ' +
+            'or adjust synesisExplorer.lsp.pythonPath.';
+
+        vscode.window.showWarningMessage(message);
+        console.warn(`DataService: LSP method not found (${lspMethod}):`, error.message);
+    }
+
+    _resolveLspMethodName(method) {
+        switch (method) {
+            case 'getReferences':
+                return 'synesis/getReferences';
+            case 'getCodes':
+                return 'synesis/getCodes';
+            case 'getRelations':
+                return 'synesis/getRelations';
+            case 'getRelationGraph':
+                return 'synesis/getRelationGraph';
+            default:
+                return method;
+        }
+    }
+
     _getWorkspaceRoot() {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && editor.document && editor.document.uri) {
+            const folder = vscode.workspace.getWorkspaceFolder(editor.document.uri);
+            if (folder && folder.uri && folder.uri.fsPath) {
+                return folder.uri.fsPath;
+            }
+        }
+
         const folders = vscode.workspace.workspaceFolders;
         return folders && folders.length > 0 ? folders[0].uri.fsPath : '';
     }

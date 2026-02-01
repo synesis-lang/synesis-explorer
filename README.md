@@ -209,12 +209,21 @@ Context menu commands (right-click in tree views):
 
 ### LSP Server
 
-By default the extension starts the LSP with `python -m synesis_lsp`. If you have the
-standalone executable, point the setting to it instead.
+By default the extension starts the LSP with `synesis-lsp` from your PATH. If you
+have the standalone executable in a custom location, point the setting to it instead.
 
 ```json
 {
   "synesisExplorer.lsp.pythonPath": "synesis-lsp"
+}
+```
+
+If you need to launch the LSP as a Python module, pass args explicitly:
+
+```json
+{
+  "synesisExplorer.lsp.pythonPath": "python",
+  "synesisExplorer.lsp.args": ["-m", "synesis_lsp"]
 }
 ```
 

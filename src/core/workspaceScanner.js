@@ -19,29 +19,44 @@
  *     const project = await scanner.findProjectFile();
  */
 
+const fs = require('fs');
+const path = require('path');
 const vscode = require('vscode');
+const projectLoader = require('./projectLoader');
 
 class WorkspaceScanner {
     /**
      * Busca todos os arquivos .syn no workspace
      * @returns {Promise<vscode.Uri[]>}
      */
-    async findSynFiles() {
-        return await vscode.workspace.findFiles(
-            '**/*.syn',
-            '**/node_modules/**'
-        );
+    async findSynFiles(projectUri) {
+        const project = await this._loadProject(projectUri);
+        if (project) {
+            const included = await this._collectIncludedFiles(project, '.syn');
+            if (included.length > 0) {
+                return included;
+            }
+            return await this._findFilesInFolder(project.dir, '**/*.syn');
+        }
+
+        return await this._findFilesInActiveWorkspace('**/*.syn');
     }
 
     /**
      * Busca todos os arquivos .syno no workspace
      * @returns {Promise<vscode.Uri[]>}
      */
-    async findSynoFiles() {
-        return await vscode.workspace.findFiles(
-            '**/*.syno',
-            '**/node_modules/**'
-        );
+    async findSynoFiles(projectUri) {
+        const project = await this._loadProject(projectUri);
+        if (project) {
+            const included = await this._collectIncludedFiles(project, '.syno');
+            if (included.length > 0) {
+                return included;
+            }
+            return await this._findFilesInFolder(project.dir, '**/*.syno');
+        }
+
+        return await this._findFilesInActiveWorkspace('**/*.syno');
     }
 
     /**
@@ -49,8 +64,13 @@ class WorkspaceScanner {
      * @returns {Promise<vscode.Uri|null>}
      */
     async findProjectFile() {
+        const workspaceFolder = this._getActiveWorkspaceFolder();
+        if (!workspaceFolder) {
+            return null;
+        }
+
         const projects = await vscode.workspace.findFiles(
-            '**/*.synp',
+            new vscode.RelativePattern(workspaceFolder, '**/*.synp'),
             '**/node_modules/**'
         );
 
@@ -62,7 +82,12 @@ class WorkspaceScanner {
             return projects[0];
         }
 
-        // Múltiplos projetos: mostrar quick pick
+        const preferred = this._pickClosestProject(projects);
+        if (preferred) {
+            return preferred;
+        }
+
+        // Múltiplos projetos: mostrar quick pick no workspace ativo
         const items = projects.map(uri => ({
             label: this._getFileName(uri),
             description: this._getRelativePath(uri),
@@ -88,7 +113,7 @@ class WorkspaceScanner {
 
         const projectDir = this._getDirectory(projectUri);
         const templates = await vscode.workspace.findFiles(
-            `${projectDir}/**/*.synt`,
+            new vscode.RelativePattern(projectDir, '**/*.synt'),
             '**/node_modules/**'
         );
 
@@ -100,8 +125,7 @@ class WorkspaceScanner {
      * @private
      */
     _getFileName(uri) {
-        const path = uri.fsPath;
-        return path.substring(path.lastIndexOf('/') + 1);
+        return path.basename(uri.fsPath || '');
     }
 
     /**
@@ -113,7 +137,7 @@ class WorkspaceScanner {
         if (!workspaceFolder) {
             return uri.fsPath;
         }
-        return uri.fsPath.substring(workspaceFolder.uri.fsPath.length + 1);
+        return path.relative(workspaceFolder.uri.fsPath, uri.fsPath);
     }
 
     /**
@@ -121,8 +145,142 @@ class WorkspaceScanner {
      * @private
      */
     _getDirectory(uri) {
-        const path = uri.fsPath;
-        return path.substring(0, path.lastIndexOf('/'));
+        return path.dirname(uri.fsPath || '');
+    }
+
+    _getActiveWorkspaceFolder(document) {
+        const doc = document || vscode.window.activeTextEditor?.document;
+        if (doc && doc.uri) {
+            const folder = vscode.workspace.getWorkspaceFolder(doc.uri);
+            if (folder) {
+                return folder;
+            }
+        }
+        const folders = vscode.workspace.workspaceFolders;
+        return folders && folders.length > 0 ? folders[0] : null;
+    }
+
+    _pickClosestProject(projects) {
+        const document = vscode.window.activeTextEditor?.document;
+        if (!document || !document.uri) {
+            return null;
+        }
+
+        const docPath = document.uri.fsPath;
+        let best = null;
+        let bestDepth = -1;
+
+        for (const uri of projects) {
+            const projectDir = path.dirname(uri.fsPath);
+            if (!docPath.startsWith(projectDir + path.sep) && docPath !== uri.fsPath) {
+                continue;
+            }
+
+            const depth = projectDir.split(path.sep).length;
+            if (depth > bestDepth) {
+                bestDepth = depth;
+                best = uri;
+            }
+        }
+
+        return best;
+    }
+
+    async _loadProject(projectUri) {
+        const projectFile = projectUri || await this.findProjectFile();
+        if (!projectFile) {
+            return null;
+        }
+
+        try {
+            return await projectLoader.load(projectFile);
+        } catch (error) {
+            console.warn('Failed to load project file:', error);
+            return null;
+        }
+    }
+
+    async _collectIncludedFiles(project, extension) {
+        if (!project || !Array.isArray(project.includes) || project.includes.length === 0) {
+            return [];
+        }
+
+        const results = new Map();
+        for (const include of project.includes) {
+            const includePath = include?.path || '';
+            const absolutePath = include?.absolutePath || '';
+            const resolvedPath = absolutePath || (includePath ? path.resolve(project.dir, includePath) : '');
+
+            const globPath = this._normalizeGlobPath(resolvedPath);
+            if (this._hasGlob(globPath)) {
+                const matches = await vscode.workspace.findFiles(globPath, '**/node_modules/**');
+                for (const match of matches) {
+                    if (this._matchesExtension(match.fsPath, extension)) {
+                        results.set(match.fsPath, match);
+                    }
+                }
+                continue;
+            }
+
+            if (!resolvedPath) {
+                continue;
+            }
+
+            try {
+                const stats = await fs.promises.stat(resolvedPath);
+                if (stats.isDirectory()) {
+                    const matches = await this._findFilesInFolder(resolvedPath, `**/*${extension}`);
+                    for (const match of matches) {
+                        results.set(match.fsPath, match);
+                    }
+                    continue;
+                }
+
+                if (stats.isFile() && this._matchesExtension(resolvedPath, extension)) {
+                    results.set(resolvedPath, vscode.Uri.file(resolvedPath));
+                }
+            } catch (error) {
+                console.warn('Included path not found:', resolvedPath);
+            }
+        }
+
+        return Array.from(results.values());
+    }
+
+    _matchesExtension(filePath, extension) {
+        return path.extname(filePath || '').toLowerCase() === extension;
+    }
+
+    _hasGlob(value) {
+        return /[*?[\]]/.test(value || '');
+    }
+
+    _normalizeGlobPath(value) {
+        if (!value) {
+            return '';
+        }
+        return value.replace(/\\/g, '/');
+    }
+
+    async _findFilesInActiveWorkspace(pattern) {
+        const workspaceFolder = this._getActiveWorkspaceFolder();
+        if (!workspaceFolder) {
+            return [];
+        }
+        return await vscode.workspace.findFiles(
+            new vscode.RelativePattern(workspaceFolder, pattern),
+            '**/node_modules/**'
+        );
+    }
+
+    async _findFilesInFolder(folderPath, pattern) {
+        if (!folderPath) {
+            return [];
+        }
+        return await vscode.workspace.findFiles(
+            new vscode.RelativePattern(folderPath, pattern),
+            '**/node_modules/**'
+        );
     }
 }
 

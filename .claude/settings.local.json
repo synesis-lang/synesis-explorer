@@ -9,7 +9,9 @@
       "Bash(where synesis-lsp)",
       "Bash(synesis-lsp:*)",
       "Bash(npm run build:*)",
-      "Bash(powershell:*)"
+      "Bash(powershell:*)",
+      "Bash(xargs ls:*)",
+      "Bash(node test/runTest.js:*)"
     ]
   }
 }

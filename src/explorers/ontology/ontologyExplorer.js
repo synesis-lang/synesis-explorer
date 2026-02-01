@@ -75,7 +75,7 @@ class OntologyExplorer {
                 return;
             }
 
-            const synoFiles = await this.scanner.findSynoFiles();
+            const synoFiles = await this.scanner.findSynoFiles(projectUri);
             for (const fileUri of synoFiles) {
                 await this._scanFile(fileUri, fieldTypes);
             }

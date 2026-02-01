@@ -148,7 +148,7 @@ class AbstractViewer {
         const showChain = chainFields.length > 0;
         const showCodes = !showChain && codeFields.length > 0;
 
-        const synFiles = await this.scanner.findSynFiles();
+        const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             const content = await vscode.workspace.fs.readFile(fileUri);

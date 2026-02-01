@@ -2,7 +2,7 @@
   "name": "synesis-explorer",
   "displayName": "Synesis Explorer",
   "description": "VSCode extension for exploring Synesis knowledge synthesis files",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "synesis",
   "repository": {
     "type": "git",
@@ -17,21 +17,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished",
-    "onCommand:synesis.reference.refresh",
-    "onCommand:synesis.reference.filter",
-    "onCommand:synesis.code.refresh",
-    "onCommand:synesis.code.filter",
-    "onCommand:synesis.relation.refresh",
-    "onCommand:synesis.relation.filter",
-    "onCommand:synesis.ontology.refresh",
-    "onCommand:synesis.ontology.filter",
-    "onCommand:synesis.ontology.annotation.refresh",
-    "onCommand:synesis.showGraph",
-    "onCommand:synesis.showAbstract",
-    "onCommand:synesis.openLocation",
-    "onCommand:synesis.lsp.loadProject",
-    "onLanguage:synesis"
+    "onLanguage:synesis",
+    "workspaceContains:**/*.synp"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -82,18 +69,16 @@
       "synesis-explorer": [
         {
           "id": "synesisReferenceExplorer",
-          "name": "References",
-          "when": "synesis.activeFileKind == syn"
+          "name": "References"
         },
         {
           "id": "synesisCodeExplorer",
-          "name": "Codes",
-          "when": "synesis.activeFileKind == syn"
+          "name": "Codes"
         },
         {
           "id": "synesisRelationExplorer",
           "name": "Relations",
-          "when": "synesis.hasChains && synesis.activeFileKind == syn"
+          "when": "synesis.hasChains"
         },
         {
           "id": "synesisOntologyTopicsExplorer",
@@ -201,32 +186,32 @@
       "view/title": [
         {
           "command": "synesis.reference.refresh",
-          "when": "view == synesisReferenceExplorer && synesis.activeFileKind == syn",
+          "when": "view == synesisReferenceExplorer",
           "group": "navigation"
         },
         {
           "command": "synesis.reference.filter",
-          "when": "view == synesisReferenceExplorer && synesis.activeFileKind == syn",
+          "when": "view == synesisReferenceExplorer",
           "group": "navigation"
         },
         {
           "command": "synesis.code.refresh",
-          "when": "view == synesisCodeExplorer && synesis.activeFileKind == syn",
+          "when": "view == synesisCodeExplorer",
           "group": "navigation"
         },
         {
           "command": "synesis.code.filter",
-          "when": "view == synesisCodeExplorer && synesis.activeFileKind == syn",
+          "when": "view == synesisCodeExplorer",
           "group": "navigation"
         },
         {
           "command": "synesis.relation.refresh",
-          "when": "view == synesisRelationExplorer && synesis.hasChains && synesis.activeFileKind == syn",
+          "when": "view == synesisRelationExplorer && synesis.hasChains",
           "group": "navigation"
         },
         {
           "command": "synesis.relation.filter",
-          "when": "view == synesisRelationExplorer && synesis.hasChains && synesis.activeFileKind == syn",
+          "when": "view == synesisRelationExplorer && synesis.hasChains",
           "group": "navigation"
         },
         {
@@ -273,8 +258,16 @@
         },
         "synesisExplorer.lsp.pythonPath": {
           "type": "string",
-          "default": "python",
-          "description": "Python executable path used to start the Synesis LSP server."
+          "default": "synesis-lsp",
+          "description": "Synesis LSP executable path."
+        },
+        "synesisExplorer.lsp.args": {
+          "type": "array",
+          "default": [],
+          "description": "Arguments passed to the Synesis LSP executable (e.g. [\"-m\", \"synesis_lsp\"]).",
+          "items": {
+            "type": "string"
+          }
         }
       }
     }

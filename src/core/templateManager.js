@@ -185,7 +185,8 @@ class TemplateManager {
             return false;
         }
 
-        return template.fields.some(field => field.type === 'TOPIC' && field.scope === 'ONTOLOGY');
+        const topicTypes = new Set(['TOPIC', 'ORDERED', 'ENUMERATED']);
+        return template.fields.some(field => topicTypes.has(field.type) && field.scope === 'ONTOLOGY');
     }
 
     _setCacheInfo(key, info) {

@@ -19,6 +19,7 @@
  *     // TreeView mostra refs com ocorrências
  */
 
+const path = require('path');
 const vscode = require('vscode');
 
 class ReferenceExplorer {
@@ -125,7 +126,7 @@ class ReferenceTreeItem extends vscode.TreeItem {
  */
 class OccurrenceTreeItem extends vscode.TreeItem {
     constructor(occurrence) {
-        const fileName = occurrence.file.substring(occurrence.file.lastIndexOf('/') + 1);
+        const fileName = path.basename(occurrence.file);
         const label = `${fileName}:${occurrence.line}`;
 
         super(label, vscode.TreeItemCollapsibleState.None);
