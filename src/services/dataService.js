@@ -1,29 +1,25 @@
 /**
- * dataService.js - Adapter Pattern para dados LSP vs Regex local
+ * dataService.js - Adapter Pattern para dados LSP
  *
  * Proposito:
- *     Abstrai a fonte de dados (LSP server ou parsers regex locais)
+ *     Abstrai a fonte de dados (LSP server)
  *     para que explorers e viewers consumam uma interface unica.
  *
  * Componentes:
  *     - LspDataProvider: envia requests ao LSP e normaliza respostas
- *     - LocalRegexProvider: encapsula logica de parsing dos explorers
- *     - DataService: orquestrador com fallback silencioso
+ *     - DataService: orquestrador de acesso LSP-only
  *
  * Shapes normalizados:
  *     - getReferences() -> Array<{ bibref, itemCount, occurrences }>
  *     - getCodes() -> Array<{ code, usageCount, ontologyDefined, occurrences }>
  *     - getRelations() -> Array<{ relation, triplets }>
  *     - getRelationGraph(bibref?) -> { mermaidCode } | null
+ *     - getOntologyTopics() -> Array<{ name, level, file, line, children }>
+ *     - getOntologyAnnotations(activeFile?) -> Array<{ code, ontologyDefined, ontologyFile, ontologyLine, occurrences }>
  */
 
 const path = require('path');
 const vscode = require('vscode');
-const SynesisParser = require('../parsers/synesisParser');
-const FieldRegistry = require('../core/fieldRegistry');
-const chainParser = require('../parsers/chainParser');
-const positionUtils = require('../utils/positionUtils');
-const { generateMermaidGraph } = require('../utils/mermaidUtils');
 
 // ---------------------------------------------------------------------------
 // LspDataProvider
@@ -78,8 +74,9 @@ class LspDataProvider {
             const entry = grouped.get(ref.bibref);
             entry.itemCount += ref.itemCount || 0;
             if (ref.location) {
+                const resolvedFile = this._resolveFilePath(ref.location.file, workspaceRoot);
                 entry.occurrences.push({
-                    file: path.resolve(workspaceRoot, ref.location.file),
+                    file: resolvedFile,
                     line: ref.location.line - 1,
                     itemCount: ref.itemCount || 0
                 });
@@ -98,12 +95,66 @@ class LspDataProvider {
             return null;
         }
 
-        return (result.codes || []).map(c => ({
-            code: c.code,
-            usageCount: c.usageCount || 0,
-            ontologyDefined: c.ontologyDefined || false,
-            occurrences: []
-        }));
+        console.log('DataService.getCodes: workspaceRoot =', workspaceRoot);
+        console.log('DataService.getCodes: result.codes count =', result.codes ? result.codes.length : 0);
+        if (result.codes && result.codes.length > 0) {
+            console.log('DataService.getCodes: First raw code from LSP:', result.codes[0]);
+        }
+
+        if (result.codes && result.codes.length > 0) {
+            const firstCode = result.codes[0];
+            console.log('DataService.getCodes: First code =', firstCode.code);
+            if (firstCode.occurrences && firstCode.occurrences.length > 0) {
+                const firstOcc = firstCode.occurrences[0];
+                console.log('DataService.getCodes: First occurrence from LSP:', {
+                    file: firstOcc.file,
+                    line: firstOcc.line,
+                    column: firstOcc.column
+                });
+            }
+        }
+
+        const codes = (result.codes || []).map(c => {
+            const occurrences = (c.occurrences || []).map(o => {
+                const resolvedFile = this._resolveFilePath(o.file, workspaceRoot);
+                if (o.file && !resolvedFile) {
+                    console.warn('DataService.getCodes: Failed to resolve file path', {
+                        original: o.file,
+                        workspaceRoot,
+                        resolved: resolvedFile
+                    });
+                }
+                return {
+                    file: resolvedFile,
+                    line: typeof o.line === 'number' ? o.line - 1 : 0,
+                    column: typeof o.column === 'number' ? o.column - 1 : 0,
+                    context: o.context || 'code',
+                    field: o.field || ''
+                };
+            });
+
+            let usageCount = typeof c.usageCount === 'number' ? c.usageCount : occurrences.length;
+            if (usageCount === 0 && occurrences.length > 0) {
+                usageCount = occurrences.length;
+            }
+
+            return {
+                code: c.code,
+                usageCount,
+                ontologyDefined: c.ontologyDefined || false,
+                occurrences
+            };
+        });
+
+        if (codes.length > 0 && codes[0].occurrences.length > 0) {
+            console.log('DataService.getCodes: First occurrence after processing:', {
+                file: codes[0].occurrences[0].file,
+                line: codes[0].occurrences[0].line,
+                column: codes[0].occurrences[0].column
+            });
+        }
+
+        return codes;
     }
 
     async getRelations(workspaceRoot) {
@@ -116,18 +167,49 @@ class LspDataProvider {
             return null;
         }
 
+        console.log('DataService.getRelations: workspaceRoot =', workspaceRoot);
+        console.log('DataService.getRelations: result.relations count =', result.relations ? result.relations.length : 0);
+        if (result.relations && result.relations.length > 0) {
+            console.log('DataService.getRelations: First raw relation from LSP:', result.relations[0]);
+            const missingLocCount = result.relations.filter(rel => !(rel && rel.location && rel.location.file)).length;
+            console.log('DataService.getRelations: Relations missing location.file:', missingLocCount);
+        }
+
+        if (result.relations && result.relations.length > 0) {
+            const firstRel = result.relations[0];
+            console.log('DataService.getRelations: First relation from LSP:', {
+                relation: firstRel.relation,
+                from: firstRel.from,
+                to: firstRel.to,
+                location: firstRel.location
+            });
+        }
+
         const grouped = new Map();
         for (const rel of (result.relations || [])) {
             if (!grouped.has(rel.relation)) {
                 grouped.set(rel.relation, { relation: rel.relation, triplets: [] });
             }
+            const hasLocation = Boolean(rel.location && rel.location.file);
+            const resolvedFile = hasLocation ? this._resolveFilePath(rel.location.file, workspaceRoot) : null;
+
+            if (hasLocation && !resolvedFile) {
+                console.warn('DataService.getRelations: Failed to resolve file path', {
+                    original: rel.location.file,
+                    workspaceRoot,
+                    resolved: resolvedFile
+                });
+            }
+
             grouped.get(rel.relation).triplets.push({
                 from: rel.from,
                 to: rel.to,
-                file: null,
-                line: -1,
-                column: -1,
-                type: ''
+                file: resolvedFile,
+                line: hasLocation && typeof rel.location.line === 'number' ? (rel.location.line - 1) : -1,
+                column: hasLocation
+                    ? (typeof rel.location.column === 'number' ? Math.max(0, rel.location.column - 1) : 0)
+                    : -1,
+                type: rel.type || ''
             });
         }
         return Array.from(grouped.values());
@@ -146,376 +228,115 @@ class LspDataProvider {
         if (!result || !result.success) {
             return null;
         }
-        return { mermaidCode: result.mermaidCode };
-    }
-}
-
-// ---------------------------------------------------------------------------
-// LocalRegexProvider
-// ---------------------------------------------------------------------------
-
-class LocalRegexProvider {
-    constructor(workspaceScanner, templateManager) {
-        this.scanner = workspaceScanner;
-        this.templateManager = templateManager;
-        this.parser = new SynesisParser();
-    }
-
-    async getReferences() {
-        const refs = new Map();
-        const projectUri = await this.scanner.findProjectFile();
-        const synFiles = await this.scanner.findSynFiles(projectUri);
-
-        for (const fileUri of synFiles) {
-            try {
-                const content = await vscode.workspace.fs.readFile(fileUri);
-                const text = content.toString();
-                const filePath = fileUri.fsPath;
-                const sources = this.parser.parseSourceBlocks(text, filePath);
-
-                for (const source of sources) {
-                    const itemCount = this.parser.countItemsInSource(text, source.bibref);
-                    if (!refs.has(source.bibref)) {
-                        refs.set(source.bibref, { bibref: source.bibref, itemCount: 0, occurrences: [] });
-                    }
-                    const entry = refs.get(source.bibref);
-                    entry.itemCount += itemCount;
-                    entry.occurrences.push({
-                        file: filePath,
-                        line: source.line,
-                        itemCount
-                    });
-                }
-            } catch (error) {
-                console.error(`LocalRegexProvider.getReferences: error scanning ${fileUri.fsPath}:`, error);
-            }
-        }
-
-        return Array.from(refs.values());
-    }
-
-    async getCodes() {
-        const codes = new Map();
-        const projectUri = await this.scanner.findProjectFile();
-        const registry = await this.templateManager.loadTemplate(projectUri);
-        const fieldRegistry = new FieldRegistry(registry);
-        const codeFields = fieldRegistry.getCodeFields();
-        const chainFields = fieldRegistry.getChainFields();
-        const synFiles = await this.scanner.findSynFiles(projectUri);
-
-        for (const fileUri of synFiles) {
-            try {
-                const content = await vscode.workspace.fs.readFile(fileUri);
-                const text = content.toString();
-                const filePath = fileUri.fsPath;
-                const lineOffsets = positionUtils.buildLineOffsets(text);
-                const items = this.parser.parseItems(text, filePath);
-
-                for (const item of items) {
-                    for (const fieldName of codeFields) {
-                        if (item.fields[fieldName]) {
-                            const extracted = this._extractCodes(item.fields[fieldName]);
-                            for (const code of extracted) {
-                                const position = this._findTokenPosition(item, fieldName, code, lineOffsets);
-                                const line = position ? position.line : item.line;
-                                const column = position ? position.column : 0;
-                                this._addCodeOccurrence(codes, code, filePath, line, column, 'code', fieldName);
-                            }
-                        }
-                    }
-
-                    for (const fieldName of chainFields) {
-                        if (item.fields[fieldName]) {
-                            const fieldDef = registry[fieldName] || {};
-                            const parsed = chainParser.parseChain(item.fields[fieldName], fieldDef);
-                            for (const code of parsed.codes) {
-                                const position = this._findTokenPosition(item, fieldName, code, lineOffsets);
-                                const line = position ? position.line : item.line;
-                                const column = position ? position.column : 0;
-                                this._addCodeOccurrence(codes, code, filePath, line, column, 'chain', fieldName);
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`LocalRegexProvider.getCodes: error scanning ${fileUri.fsPath}:`, error);
-            }
-        }
-
-        return Array.from(codes.entries()).map(([code, occurrences]) => ({
-            code,
-            usageCount: occurrences.length,
-            ontologyDefined: false,
-            occurrences
-        }));
-    }
-
-    async getRelations() {
-        const relations = new Map();
-        const projectUri = await this.scanner.findProjectFile();
-        if (!projectUri) {
-            return [];
-        }
-
-        const registry = await this.templateManager.loadTemplate(projectUri);
-        const fieldRegistry = new FieldRegistry(registry);
-        const chainFields = fieldRegistry.getChainFields();
-
-        if (chainFields.length === 0) {
-            return [];
-        }
-
-        const synFiles = await this.scanner.findSynFiles(projectUri);
-
-        for (const fileUri of synFiles) {
-            try {
-                const content = await vscode.workspace.fs.readFile(fileUri);
-                const text = content.toString();
-                const filePath = fileUri.fsPath;
-                const lineOffsets = positionUtils.buildLineOffsets(text);
-                const items = this.parser.parseItems(text, filePath);
-
-                for (const item of items) {
-                    for (const fieldName of chainFields) {
-                        if (!item.fields[fieldName]) {
-                            continue;
-                        }
-
-                        const fieldDef = registry[fieldName] || {};
-                        const parsed = chainParser.parseChain(item.fields[fieldName], fieldDef);
-
-                        for (let index = 0; index < parsed.relations.length; index += 1) {
-                            const relation = parsed.relations[index];
-                            const from = parsed.codes[index];
-                            const to = parsed.codes[index + 1];
-                            const position = this._findTokenPosition(item, fieldName, relation, lineOffsets);
-                            const line = position ? position.line : item.line;
-                            const column = position ? position.column : 0;
-
-                            if (!relations.has(relation)) {
-                                relations.set(relation, { relation, triplets: [] });
-                            }
-                            relations.get(relation).triplets.push({
-                                from,
-                                to,
-                                file: filePath,
-                                line,
-                                column,
-                                type: parsed.type
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`LocalRegexProvider.getRelations: error scanning ${fileUri.fsPath}:`, error);
-            }
-        }
-
-        return Array.from(relations.values());
-    }
-
-    async getRelationGraph(_workspaceRoot, bibref) {
-        if (!bibref) {
-            return null;
-        }
-
-        const projectUri = await this.scanner.findProjectFile();
-        if (!projectUri) {
-            return null;
-        }
-
-        const registry = await this.templateManager.loadTemplate(projectUri);
-        const info = this.templateManager.getTemplateInfo(projectUri);
-        const fieldRegistry = new FieldRegistry(registry);
-        const chainFields = fieldRegistry.getChainFields();
-        const hasChains = Boolean(info && info.fromTemplate && info.hasChainFields && chainFields.length > 0);
-
-        if (!hasChains) {
-            return null;
-        }
-
-        const relations = [];
-        const synFiles = await this.scanner.findSynFiles(projectUri);
-
-        for (const fileUri of synFiles) {
-            try {
-                const content = await vscode.workspace.fs.readFile(fileUri);
-                const text = content.toString();
-                const filePath = fileUri.fsPath;
-                const items = this.parser.parseItems(text, filePath);
-                const filtered = items.filter(item => item.bibref === bibref);
-
-                for (const item of filtered) {
-                    for (const fieldName of chainFields) {
-                        const chainValues = this._getChainValues(item, fieldName);
-                        if (chainValues.length === 0) {
-                            continue;
-                        }
-
-                        const fieldDef = registry[fieldName] || {};
-                        const chainTexts = chainValues.flatMap(value => this._splitChainValues(value));
-
-                        for (const chainText of chainTexts) {
-                            const parsed = chainParser.parseChain(chainText, fieldDef);
-                            for (let index = 0; index < parsed.relations.length; index += 1) {
-                                relations.push({
-                                    from: parsed.codes[index],
-                                    to: parsed.codes[index + 1],
-                                    label: parsed.relations[index] || ''
-                                });
-                            }
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error(`LocalRegexProvider.getRelationGraph: error scanning ${fileUri.fsPath}:`, error);
-            }
-        }
-
-        const mermaidCode = generateMermaidGraph(bibref, relations);
-        if (!mermaidCode) {
-            return null;
-        }
-
+        const mermaidCode = result.mermaidCode || result.mermaid || '';
         return { mermaidCode };
     }
 
-    // -- Private helpers (extracted from CodeExplorer / RelationExplorer) --
-
-    _extractCodes(value) {
-        return value.split(',').map(item => item.trim()).filter(Boolean);
-    }
-
-    _addCodeOccurrence(codes, code, filePath, line, column, context, fieldName) {
-        if (!codes.has(code)) {
-            codes.set(code, []);
-        }
-        codes.get(code).push({ file: filePath, line, column, context, field: fieldName });
-    }
-
-    _findTokenPosition(item, fieldName, token, lineOffsets) {
-        if (!item.blockContent || typeof item.blockOffset !== 'number') {
-            return null;
-        }
-
-        const fieldInfo = this._findFieldValueInfo(item.blockContent, fieldName);
-        if (!fieldInfo) {
-            return null;
-        }
-
-        const tokenOffset = this._findTokenOffset(fieldInfo.value, token);
-        if (tokenOffset === null) {
-            return null;
-        }
-
-        const absoluteOffset = item.blockOffset + fieldInfo.valueStart + tokenOffset;
-        return positionUtils.getLineColumn(lineOffsets, absoluteOffset);
-    }
-
-    _findFieldValueInfo(blockContent, fieldName) {
-        const escapedName = this._escapeRegex(fieldName);
-        const pattern = new RegExp(
-            `^\\s*${escapedName}\\s*:\\s*([\\s\\S]*?)(?=^\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*(?![\\s\\S]))`,
-            'gmu'
+    async getOntologyTopics(workspaceRoot) {
+        const result = await this._sendRequestWithFallback(
+            'synesis/getOntologyTopics',
+            { workspaceRoot },
+            ['synesis/get_ontology_topics']
         );
+        if (!result || !result.success) {
+            return null;
+        }
+        const topics = Array.isArray(result.topics) ? result.topics : [];
+        return topics
+            .map(topic => this._normalizeTopic(topic, workspaceRoot))
+            .filter(Boolean);
+    }
 
-        const match = pattern.exec(blockContent);
-        if (!match) {
+    _normalizeTopic(topic, workspaceRoot) {
+        if (!topic || typeof topic !== 'object') {
             return null;
         }
 
-        const value = match[1];
-        const valueStart = match.index + match[0].length - value.length;
-        return { value, valueStart };
-    }
-
-    _findTokenOffset(value, token) {
-        const escaped = this._escapeRegex(token);
-        const pattern = new RegExp(`(^|[^\\p{L}\\p{N}._-])(${escaped})(?=$|[^\\p{L}\\p{N}._-])`, 'u');
-        const match = pattern.exec(value);
-        if (!match) {
-            return null;
-        }
-        return match.index + match[1].length;
-    }
-
-    _escapeRegex(text) {
-        return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    }
-
-    // -- Graph helpers (extracted from GraphViewer) --
-
-    _getChainValues(item, fieldName) {
-        if (!item || !fieldName) {
-            return [];
-        }
-
-        const values = this._extractFieldValues(item.blockContent, fieldName);
-        if (values.length > 0) {
-            return values;
-        }
-
-        if (item.fields && item.fields[fieldName]) {
-            return [item.fields[fieldName]];
-        }
-
-        return [];
-    }
-
-    _extractFieldValues(blockContent, fieldName) {
-        if (!blockContent) {
-            return [];
-        }
-
-        const values = [];
-        const lines = blockContent.split('\n');
-        let currentField = null;
-        let currentValue = [];
-
-        for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed || trimmed.startsWith('#')) {
-                continue;
-            }
-
-            const fieldMatch = trimmed.match(/^([\p{L}\p{N}._-]+)\s*:\s*(.*)$/u);
-            if (fieldMatch) {
-                if (currentField === fieldName) {
-                    values.push(currentValue.join('\n').trim());
-                }
-                currentField = fieldMatch[1];
-                currentValue = [fieldMatch[2]];
-                continue;
-            }
-
-            if (currentField === fieldName) {
-                currentValue.push(trimmed);
-            }
-        }
-
-        if (currentField === fieldName) {
-            values.push(currentValue.join('\n').trim());
-        }
-
-        return values.filter(Boolean);
-    }
-
-    _splitChainValues(value) {
-        const rawLines = String(value || '')
-            .split(/\r?\n/)
-            .map(line => line.trim())
+        const children = Array.isArray(topic.children) ? topic.children : [];
+        const normalizedChildren = children
+            .map(child => this._normalizeTopic(child, workspaceRoot))
             .filter(Boolean);
 
-        if (rawLines.length <= 1) {
-            return rawLines;
+        const resolvedFile = this._resolveFilePath(topic.file, workspaceRoot);
+        const normalizedLine = typeof topic.line === 'number' ? Math.max(0, topic.line - 1) : 0;
+
+        return {
+            name: topic.name || '',
+            level: typeof topic.level === 'number' ? topic.level : 0,
+            file: resolvedFile,
+            line: normalizedLine,
+            children: normalizedChildren
+        };
+    }
+
+    async getOntologyAnnotations(workspaceRoot, activeFile) {
+        const params = { workspaceRoot };
+        if (activeFile) {
+            params.activeFile = activeFile;
+        }
+        const result = await this._sendRequestWithFallback(
+            'synesis/getOntologyAnnotations',
+            params,
+            ['synesis/get_ontology_annotations']
+        );
+        if (!result || !result.success) {
+            return null;
+        }
+        if (Array.isArray(result.annotations) && result.annotations.length > 0) {
+            console.log('DataService.getOntologyAnnotations: First raw annotation from LSP:', result.annotations[0]);
+            const missingFileCount = result.annotations.reduce((count, annotation) => {
+                const occs = Array.isArray(annotation.occurrences) ? annotation.occurrences : [];
+                return count + occs.filter(occ => !occ.file).length;
+            }, 0);
+            console.log('DataService.getOntologyAnnotations: Occurrences missing file:', missingFileCount);
+        }
+        const annotations = Array.isArray(result.annotations) ? result.annotations : [];
+        return annotations.map(annotation => {
+            const occurrences = Array.isArray(annotation.occurrences) ? annotation.occurrences : [];
+            const normalizedOccurrences = occurrences.map(occ => ({
+                file: this._resolveFilePath(occ.file, workspaceRoot),
+                line: typeof occ.line === 'number' ? Math.max(0, occ.line - 1) : 0,
+                column: typeof occ.column === 'number' ? Math.max(0, occ.column - 1) : 0,
+                context: occ.context || '',
+                field: occ.field || '',
+                itemName: occ.itemName || ''
+            }));
+
+            return {
+                code: annotation.code,
+                ontologyDefined: Boolean(annotation.ontologyDefined),
+                ontologyFile: this._resolveFilePath(annotation.ontologyFile, workspaceRoot),
+                ontologyLine: typeof annotation.ontologyLine === 'number'
+                    ? Math.max(0, annotation.ontologyLine - 1)
+                    : null,
+                occurrences: normalizedOccurrences
+            };
+        });
+    }
+
+    _resolveFilePath(fileValue, workspaceRoot) {
+        if (!fileValue || typeof fileValue !== 'string') {
+            return null;
         }
 
-        const hasContinuation = rawLines.some(line => line.endsWith('->') || line.startsWith('->'));
-        if (hasContinuation) {
-            return [rawLines.join(' ')];
+        let normalized = fileValue;
+        if (normalized.startsWith('file://')) {
+            try {
+                normalized = vscode.Uri.parse(normalized).fsPath;
+            } catch (error) {
+                console.warn('DataService: Failed to parse file URI', normalized);
+            }
         }
 
-        return rawLines;
+        if (path.isAbsolute(normalized)) {
+            return normalized;
+        }
+
+        if (workspaceRoot) {
+            return path.resolve(workspaceRoot, normalized);
+        }
+
+        return path.resolve(normalized);
     }
 }
 
@@ -524,52 +345,81 @@ class LocalRegexProvider {
 // ---------------------------------------------------------------------------
 
 class DataService {
-    constructor({ lspClient, workspaceScanner, templateManager, onLspIncompatible }) {
+    constructor({ lspClient, onLspIncompatible } = {}) {
         this.lspClient = lspClient || null;
         this.lspProvider = lspClient ? new LspDataProvider(lspClient) : null;
-        this.localProvider = new LocalRegexProvider(workspaceScanner, templateManager);
         this.unsupportedMethods = new Set();
         this.warnedUnsupported = false;
         this.onLspIncompatible = typeof onLspIncompatible === 'function' ? onLspIncompatible : null;
         this._lspNullCount = 0;
         this._lspNullWarned = false;
+        this._warnedLspRequired = new Set();
     }
 
     async getReferences() {
-        return this._tryLspThenLocal('getReferences');
+        return this._callLsp('getReferences');
     }
 
     async getCodes() {
-        return this._tryLspThenLocal('getCodes');
+        return this._callLsp('getCodes');
     }
 
     async getRelations() {
-        return this._tryLspThenLocal('getRelations');
+        return this._callLsp('getRelations');
     }
 
     async getRelationGraph(bibref) {
-        return this._tryLspThenLocal('getRelationGraph', bibref);
+        return this._callLsp('getRelationGraph', bibref);
     }
 
-    async _tryLspThenLocal(method, ...args) {
-        if (this.lspClient && this.lspClient.isReady() && !this.unsupportedMethods.has(method)) {
+    async getOntologyTopics() {
+        return this._callLsp('getOntologyTopics');
+    }
+
+    async getOntologyAnnotations(activeFile) {
+        return this._callLsp('getOntologyAnnotations', activeFile);
+    }
+
+    async _callLsp(method, ...args) {
+        const lspReady = Boolean(this.lspClient && this.lspClient.isReady());
+
+        console.log(`DataService.${method}: lspReady=${lspReady}`);
+
+        if (lspReady && !this.unsupportedMethods.has(method)) {
             try {
                 const workspaceRoot = this._getWorkspaceRoot();
+                console.log(`DataService.${method}: Calling LSP provider with workspaceRoot=${workspaceRoot}`);
                 const result = await this.lspProvider[method](workspaceRoot, ...args);
                 if (result !== null) {
+                    console.log(`DataService.${method}: LSP returned valid result`);
                     return result;
                 }
-                console.warn(`DataService: LSP ${method} returned null, falling back to local`);
+
+                console.warn(`DataService.${method}: LSP returned null - returning empty result`);
                 this._trackLspNull();
+                this._warnLspRequired(method, 'LSP returned empty data');
+                return this._emptyResultFor(method);
             } catch (error) {
                 if (this._isMethodNotFound(error)) {
+                    console.error(`DataService.${method}: LSP method not found (code -32601)`);
                     this.unsupportedMethods.add(method);
                     this._warnUnsupported(method, error);
+                    return this._emptyResultFor(method);
                 }
-                console.warn(`DataService: LSP ${method} failed, falling back to local:`, error.message);
+
+                console.error(`DataService.${method}: LSP error:`, error.message);
+                this._warnLspRequired(method, error.message);
+                return this._emptyResultFor(method);
             }
         }
-        return this.localProvider[method](...args);
+
+        console.error(`DataService.${method}: LSP required but not available - returning empty result`);
+        if (this.unsupportedMethods.has(method)) {
+            this._warnLspRequired(method, 'LSP method not supported');
+        } else if (!lspReady) {
+            this._warnLspRequired(method, this.lspClient ? 'LSP not ready' : 'LSP disabled');
+        }
+        return this._emptyResultFor(method);
     }
 
     _trackLspNull() {
@@ -598,8 +448,7 @@ class DataService {
         }
         const lspMethod = this._resolveLspMethodName(method);
         const message = `Synesis LSP does not support "${lspMethod}". ` +
-            'Using local parsers instead. Update synesis-lsp to v1.0.0+ ' +
-            'or adjust synesisExplorer.lsp.pythonPath.';
+            'Update synesis-lsp to v0.13.0+ or adjust synesisExplorer.lsp.pythonPath.';
 
         vscode.window.showWarningMessage(message);
         console.warn(`DataService: LSP method not found (${lspMethod}):`, error.message);
@@ -615,9 +464,41 @@ class DataService {
                 return 'synesis/getRelations';
             case 'getRelationGraph':
                 return 'synesis/getRelationGraph';
+            case 'getOntologyTopics':
+                return 'synesis/getOntologyTopics';
+            case 'getOntologyAnnotations':
+                return 'synesis/getOntologyAnnotations';
             default:
                 return method;
         }
+    }
+
+    _emptyResultFor(method) {
+        switch (method) {
+            case 'getReferences':
+            case 'getCodes':
+            case 'getRelations':
+            case 'getOntologyTopics':
+            case 'getOntologyAnnotations':
+                return [];
+            case 'getRelationGraph':
+                return null;
+            default:
+                return null;
+        }
+    }
+
+    _warnLspRequired(method, reason) {
+        if (this._warnedLspRequired.has(method)) {
+            return;
+        }
+
+        this._warnedLspRequired.add(method);
+        const lspMethod = this._resolveLspMethodName(method);
+        const suffix = reason ? ` (${reason})` : '';
+        vscode.window.showWarningMessage(
+            `Synesis LSP is required for "${lspMethod}".${suffix}`
+        );
     }
 
     _getWorkspaceRoot() {

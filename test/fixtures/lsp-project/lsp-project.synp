@@ -1,6 +1,0 @@
-PROJECT Lsp_Hover_Demo
-    TEMPLATE "lsp-project.synt"
-    INCLUDE ANNOTATIONS "lsp-project.syn"
-    INCLUDE ONTOLOGY "lsp-ontology.syno"
-    INCLUDE BIBLIOGRAPHY "lsp-project.bib"
-END PROJECT

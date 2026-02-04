@@ -10,8 +10,8 @@
  *     - showGraphPanel: Renderiza webview com Mermaid.js
  *
  * Dependencias criticas:
- *     - DataService: Adapter LSP/local para mermaidCode
- *     - SynesisParser: apenas para _findBibref (identifica bibref sob cursor)
+ *     - DataService: LSP-only access for mermaidCode
+ *     - SynesisParser: Fallback local para extracao de bibref
  */
 
 const vscode = require('vscode');
@@ -20,8 +20,8 @@ const SynesisParser = require('../parsers/synesisParser');
 class GraphViewer {
     constructor(dataService) {
         this.dataService = dataService;
-        this.parser = new SynesisParser();
         this.panel = null;
+        this.parser = new SynesisParser();
     }
 
     async showGraph() {
@@ -31,18 +31,30 @@ class GraphViewer {
             return;
         }
 
-        const bibref = this._findBibref(editor.document, editor.selection.active);
+        console.log('GraphViewer.showGraph: Starting graph generation');
+        console.log('GraphViewer.showGraph: Document URI:', editor.document.uri.toString());
+
+        const bibref = await this._findBibref(editor.document, editor.selection.active);
         if (!bibref) {
-            vscode.window.showWarningMessage('No reference found. Position cursor inside a SOURCE or ITEM block.');
+            console.warn('GraphViewer.showGraph: No bibref found at cursor position');
+            vscode.window.showWarningMessage(
+                'No reference found. Place the cursor inside a SOURCE or ITEM block.'
+            );
             return;
         }
 
+        console.log('GraphViewer.showGraph: Found bibref:', bibref);
+
         const result = await this.dataService.getRelationGraph(bibref);
+        console.log('GraphViewer.showGraph: getRelationGraph result:', result);
+
         if (!result || !result.mermaidCode) {
+            console.warn('GraphViewer.showGraph: No mermaid code generated for bibref:', bibref);
             vscode.window.showWarningMessage(`No chain relations found for ${bibref}.`);
             return;
         }
 
+        console.log('GraphViewer.showGraph: Opening graph panel with mermaid code length:', result.mermaidCode.length);
         this.showGraphPanel(bibref, result.mermaidCode);
     }
 
@@ -210,6 +222,31 @@ class GraphViewer {
             height: auto !important;
         }
 
+        .mermaid svg .node rect,
+        .mermaid svg .node polygon,
+        .mermaid svg .node circle {
+            fill: #dbeafe;
+            stroke: #3b82f6;
+            stroke-width: 2px;
+            rx: 12px;
+            ry: 12px;
+        }
+
+        .mermaid svg .nodeLabel,
+        .mermaid svg .label {
+            color: #1e40af;
+            fill: #1e40af;
+        }
+
+        .mermaid svg .edgePath path {
+            stroke: #94a3b8;
+            stroke-width: 1.6px;
+        }
+
+        .mermaid svg .edgeLabel {
+            color: #1e40af;
+        }
+
         .error {
             color: var(--danger);
             padding: 20px;
@@ -294,66 +331,134 @@ ${mermaidCode}
             }
         }, { passive: false });
 
-        mermaid.initialize({
-            startOnLoad: true,
-            theme: 'base',
-            themeVariables: {
-                fontFamily: 'Inter, system-ui',
-                fontSize: '14px'
-            },
-            flowchart: {
-                useMaxWidth: false,
-                htmlLabels: true,
-                curve: 'cardinal'
-            }
-        });
-
-        setTimeout(() => {
-            const wrapper = document.getElementById('mermaidWrapper');
-            const content = document.getElementById('mermaidContent');
-            const svg = content.querySelector('svg');
-
-            if (svg && wrapper) {
-                const wrapperWidth = wrapper.clientWidth - 40;
-                const wrapperHeight = wrapper.clientHeight - 40;
-                const svgWidth = svg.getBBox().width;
-                const svgHeight = svg.getBBox().height;
-
-                const scaleX = wrapperWidth / svgWidth;
-                const scaleY = wrapperHeight / svgHeight;
-                const initialScale = Math.min(scaleX, scaleY, 1.0);
-
-                if (initialScale < 1.0) {
-                    updateZoom(initialScale);
+        if (typeof mermaid === 'undefined') {
+            document.getElementById('mermaidContent').innerHTML =
+                '<div class="error">Failed to load Mermaid library. Check your network connection.</div>';
+        } else {
+            mermaid.initialize({
+                startOnLoad: false,
+                theme: 'base',
+                themeVariables: {
+                    fontFamily: 'Inter, system-ui',
+                    fontSize: '14px',
+                    primaryColor: '#dbeafe',
+                    primaryBorderColor: '#3b82f6',
+                    primaryTextColor: '#1e40af',
+                    lineColor: '#94a3b8'
+                },
+                flowchart: {
+                    useMaxWidth: false,
+                    htmlLabels: false,
+                    curve: 'cardinal'
                 }
-            }
-        }, 100);
+            });
+
+            mermaid.run({ nodes: [document.getElementById('mermaidContent')] })
+                .then(() => {
+                    const wrapper = document.getElementById('mermaidWrapper');
+                    const content = document.getElementById('mermaidContent');
+                    const svg = content.querySelector('svg');
+
+                    if (svg && wrapper) {
+                        const wrapperWidth = wrapper.clientWidth - 40;
+                        const wrapperHeight = wrapper.clientHeight - 40;
+                        const svgWidth = svg.getBBox().width;
+                        const svgHeight = svg.getBBox().height;
+
+                        const scaleX = wrapperWidth / svgWidth;
+                        const scaleY = wrapperHeight / svgHeight;
+                        const initialScale = Math.min(scaleX, scaleY, 1.0);
+
+                        if (initialScale < 1.0) {
+                            updateZoom(initialScale);
+                        }
+                    }
+                })
+                .catch(function(err) {
+                    document.getElementById('mermaidContent').innerHTML =
+                        '<div class="error">Failed to render graph: ' + err.message + '</div>';
+                });
+        }
     </script>
 </body>
 </html>`;
     }
 
-    _findBibref(document, position) {
-        const text = document.getText();
-        const offset = document.offsetAt(position);
-        const filePath = document.uri.fsPath;
+    async _findBibref(document, position) {
+        const lspReady = Boolean(this.dataService && this.dataService.lspClient && this.dataService.lspClient.isReady());
+        console.log('GraphViewer._findBibref: LSP ready?', lspReady);
 
-        const items = this.parser.parseItems(text, filePath);
-        const item = items.find(block => offset >= block.startOffset && offset <= block.endOffset);
-        if (item) {
-            return item.bibref;
-        }
+        let bibref = null;
 
-        const sources = this.parser.parseSourceBlocks(text, filePath);
-        let last = null;
-
-        for (const source of sources) {
-            if (source.startOffset <= offset) {
-                last = source.bibref;
+        if (lspReady) {
+            bibref = await this._findBibrefViaLsp(document, position);
+            if (bibref) {
+                return bibref;
             }
+            console.warn('GraphViewer._findBibref: LSP did not return a bibref, falling back to local parsing');
+        } else {
+            console.warn('GraphViewer._findBibref: LSP not ready, falling back to local parsing');
         }
 
-        return last;
+        return this._findBibrefLocal(document, position);
+    }
+
+    async _findBibrefViaLsp(document, position) {
+        try {
+            console.log('GraphViewer._findBibrefViaLsp: Requesting document symbols for', document.uri.toString());
+            const symbols = await vscode.commands.executeCommand(
+                'vscode.executeDocumentSymbolProvider',
+                document.uri
+            );
+
+            console.log('GraphViewer._findBibrefViaLsp: Received symbols count:', symbols ? symbols.length : 0);
+            if (!symbols || symbols.length === 0) {
+                console.warn('GraphViewer._findBibrefViaLsp: No symbols returned from LSP');
+                return null;
+            }
+
+            const bibref = extractBibrefFromSymbols(symbols, position);
+            console.log('GraphViewer._findBibrefViaLsp: Extracted bibref:', bibref);
+            return bibref;
+        } catch (error) {
+            console.warn('GraphViewer._findBibrefViaLsp: Failed to resolve bibref via LSP:', error.message);
+            return null;
+        }
+    }
+
+    _findBibrefLocal(document, position) {
+        try {
+            const text = document.getText();
+            const filePath = document.uri.fsPath || '';
+            const offset = document.offsetAt(position);
+
+            const items = this.parser.parseItems(text, filePath);
+            const item = items.find(entry => offset >= entry.startOffset && offset <= entry.endOffset);
+            if (item && item.bibref) {
+                console.log('GraphViewer._findBibrefLocal: Found bibref in ITEM block:', item.bibref);
+                return item.bibref;
+            }
+
+            const sources = this.parser.parseSourceBlocks(text, filePath);
+            const source = sources.find(entry => offset >= entry.startOffset && offset <= entry.endOffset);
+            if (source && source.bibref) {
+                console.log('GraphViewer._findBibrefLocal: Found bibref in SOURCE block:', source.bibref);
+                return source.bibref;
+            }
+
+            const lineText = document.lineAt(position.line).text;
+            const match = lineText.match(/@[\w._-]+/);
+            const inlineBibref = match ? match[0] : null;
+            if (inlineBibref) {
+                console.log('GraphViewer._findBibrefLocal: Found inline bibref:', inlineBibref);
+            } else {
+                console.warn('GraphViewer._findBibrefLocal: No bibref found via local parsing');
+            }
+            return inlineBibref;
+        } catch (error) {
+            console.warn('GraphViewer._findBibrefLocal: Failed to parse document:', error.message);
+            return null;
+        }
     }
 }
 
@@ -371,3 +476,72 @@ function escapeHtml(value) {
 }
 
 module.exports = GraphViewer;
+
+function extractBibrefFromSymbols(symbols, position) {
+    const stack = [];
+    const found = findSymbolPath(symbols, position, stack);
+    if (!found) {
+        return null;
+    }
+
+    for (let i = stack.length - 1; i >= 0; i -= 1) {
+        const name = stack[i]?.name || stack[i]?.containerName || '';
+        const bibref = extractBibref(name);
+        if (bibref) {
+            return bibref;
+        }
+    }
+
+    return null;
+}
+
+function findSymbolPath(symbols, position, stack) {
+    for (const symbol of symbols) {
+        const range = symbol.range || symbol.location?.range;
+        if (!range || !isPositionInRange(position, range)) {
+            continue;
+        }
+
+        stack.push(symbol);
+
+        if (Array.isArray(symbol.children) && symbol.children.length > 0) {
+            const found = findSymbolPath(symbol.children, position, stack);
+            if (found) {
+                return found;
+            }
+        }
+
+        return symbol;
+    }
+
+    return null;
+}
+
+function isPositionInRange(position, range) {
+    if (!position || !range) {
+        return false;
+    }
+
+    if (position.line < range.start.line || position.line > range.end.line) {
+        return false;
+    }
+
+    if (position.line === range.start.line && position.character < range.start.character) {
+        return false;
+    }
+
+    if (position.line === range.end.line && position.character > range.end.character) {
+        return false;
+    }
+
+    return true;
+}
+
+function extractBibref(text) {
+    if (!text) {
+        return null;
+    }
+
+    const match = String(text).match(/@[\w._-]+/);
+    return match ? match[0] : null;
+}

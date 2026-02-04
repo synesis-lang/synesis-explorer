@@ -1,8 +1,7 @@
 /**
  * mermaidUtils.js - Utilitarios para geracao de grafos Mermaid
  *
- * Extraido de graphViewer.js para reuso pelo DataService (LocalRegexProvider)
- * e pelo proprio GraphViewer.
+ * Extraido de graphViewer.js para reuso pelo GraphViewer.
  */
 
 function ensureNodeId(map, name) {
@@ -42,7 +41,12 @@ function getNodeClass(label) {
 }
 
 function escapeMermaidLabel(value) {
-    return String(value || '').replace(/"/g, '\\"');
+    return String(value || '')
+        .replace(/"/g, '&quot;')
+        .replace(/\[/g, '&#91;')
+        .replace(/]/g, '&#93;')
+        .replace(/\|/g, '&#124;')
+        .replace(/[<>(){}#]/g, ch => `&#${ch.charCodeAt(0)};`);
 }
 
 function generateMermaidGraph(reference, relations) {

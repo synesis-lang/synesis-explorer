@@ -1,0 +1,4 @@
+{
+  "synesis.pythonPath": "${workspaceFolder}/../../.venv/bin/python",
+  "editor.wordWrap": "on"
+}

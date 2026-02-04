@@ -1,5 +1,0 @@
-PROJECT
-    name: Sample Synesis Project
-    template: sample.synt
-    bibliography: sample.bib
-END PROJECT

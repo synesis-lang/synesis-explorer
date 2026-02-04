@@ -50,15 +50,59 @@ let lspCommandLabel;
 let lspCommandPath;
 let lspCommandArgs;
 let pendingLspWorkspaceRoot;
+let referenceTreeView;
+let codeTreeView;
+let relationTreeView;
+
+const MIN_LSP_VERSION = '0.13.0';
+const SYNESIS_CUSTOM_METHODS = [
+    {
+        method: 'synesis/getReferences',
+        dataServiceMethod: 'getReferences',
+        legacy: ['synesis/get_references']
+    },
+    {
+        method: 'synesis/getCodes',
+        dataServiceMethod: 'getCodes',
+        legacy: ['synesis/get_codes']
+    },
+    {
+        method: 'synesis/getRelations',
+        dataServiceMethod: 'getRelations',
+        legacy: ['synesis/get_relations']
+    },
+    {
+        method: 'synesis/getRelationGraph',
+        dataServiceMethod: 'getRelationGraph',
+        legacy: ['synesis/get_relation_graph']
+    },
+    {
+        method: 'synesis/getOntologyTopics',
+        dataServiceMethod: 'getOntologyTopics',
+        legacy: ['synesis/get_ontology_topics']
+    },
+    {
+        method: 'synesis/getOntologyAnnotations',
+        dataServiceMethod: 'getOntologyAnnotations',
+        legacy: ['synesis/get_ontology_annotations']
+    }
+];
+
 
 /**
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
     console.log('Synesis Explorer is now active');
+    vscode.commands.executeCommand('setContext', 'synesis.hasCodes', false);
     vscode.commands.executeCommand('setContext', 'synesis.hasChains', false);
     vscode.commands.executeCommand('setContext', 'synesis.hasTopics', false);
     vscode.commands.executeCommand('setContext', 'synesis.hasOntologyAnnotations', false);
+    vscode.commands.executeCommand('setContext', 'synesis.code.filterActive', false);
+    vscode.commands.executeCommand('setContext', 'synesis.reference.filterActive', false);
+    vscode.commands.executeCommand('setContext', 'synesis.ontology.filterActive', false);
+    vscode.commands.executeCommand('setContext', 'synesis.ontology.annotation.filterActive', false);
+    vscode.commands.executeCommand('setContext', 'synesis.relation.filterActive', false);
 
     const editorConfig = vscode.workspace.getConfiguration('editor');
     editorConfig.update('wordWrap', 'on', vscode.ConfigurationTarget.Workspace);
@@ -85,40 +129,38 @@ function activate(context) {
     const templateManager = new TemplateManager();
     const workspaceScanner = new WorkspaceScanner();
 
-    // DataService (Adapter Pattern: LSP vs local regex)
+    // DataService (LSP-only adapter)
     dataService = new DataService({
         lspClient: lspClient || null,
-        workspaceScanner,
-        templateManager,
         onLspIncompatible: () => setLspStatus('incompatible')
     });
 
     // Initialize Reference Explorer
     const referenceExplorer = new ReferenceExplorer(dataService);
-    const referenceTreeView = vscode.window.createTreeView('synesisReferenceExplorer', {
+    referenceTreeView = vscode.window.createTreeView('synesisReferenceExplorer', {
         treeDataProvider: referenceExplorer,
         showCollapseAll: true
     });
 
     const codeExplorer = new CodeExplorer(dataService);
-    const codeTreeView = vscode.window.createTreeView('synesisCodeExplorer', {
+    codeTreeView = vscode.window.createTreeView('synesisCodeExplorer', {
         treeDataProvider: codeExplorer,
         showCollapseAll: true
     });
 
     const relationExplorer = new RelationExplorer(dataService);
-    const relationTreeView = vscode.window.createTreeView('synesisRelationExplorer', {
+    relationTreeView = vscode.window.createTreeView('synesisRelationExplorer', {
         treeDataProvider: relationExplorer,
         showCollapseAll: true
     });
 
-    const ontologyExplorer = new OntologyExplorer(workspaceScanner, templateManager);
+    const ontologyExplorer = new OntologyExplorer(dataService);
     const ontologyTreeView = vscode.window.createTreeView('synesisOntologyTopicsExplorer', {
         treeDataProvider: ontologyExplorer,
         showCollapseAll: true
     });
 
-    const ontologyAnnotationExplorer = new OntologyAnnotationExplorer(workspaceScanner, templateManager);
+    const ontologyAnnotationExplorer = new OntologyAnnotationExplorer(dataService);
     const ontologyAnnotationTreeView = vscode.window.createTreeView('synesisOntologyAnnotationExplorer', {
         treeDataProvider: ontologyAnnotationExplorer,
         showCollapseAll: true
@@ -186,8 +228,10 @@ function activate(context) {
     };
 
     if (lspStartPromise) {
-        lspStartPromise.then((started) => {
+        lspStartPromise.then(async (started) => {
             if (started) {
+                validateLspCapabilities();
+                await validateSynesisCustomMethods();
                 runLspLoadProject({ showProgress: true, showErrorMessage: true });
             } else {
                 refreshAllExplorers();
@@ -246,6 +290,21 @@ function activate(context) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.reference.filterActive', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter references by name (leave blank to show all)',
+                value: referenceExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            referenceExplorer.setFilter(value);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('synesis.code.refresh', () => {
             codeExplorer.refresh();
         })
@@ -253,6 +312,21 @@ function activate(context) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.code.filter', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter codes by name (leave blank to show all)',
+                value: codeExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            codeExplorer.setFilter(value);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.code.filterActive', async () => {
             const value = await vscode.window.showInputBox({
                 prompt: 'Filter codes by name (leave blank to show all)',
                 value: codeExplorer.getFilter()
@@ -288,6 +362,21 @@ function activate(context) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.relation.filterActive', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter relations by name (leave blank to show all)',
+                value: relationExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            relationExplorer.setFilter(value);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('synesis.ontology.refresh', () => {
             ontologyExplorer.refresh();
         })
@@ -309,8 +398,53 @@ function activate(context) {
     );
 
     context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.ontology.filterActive', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter topics by name (leave blank to show all)',
+                value: ontologyExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            ontologyExplorer.setFilter(value);
+        })
+    );
+
+    context.subscriptions.push(
         vscode.commands.registerCommand('synesis.ontology.annotation.refresh', () => {
             ontologyAnnotationExplorer.refresh();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.ontology.annotation.filter', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter ontology annotations by name (leave blank to show all)',
+                value: ontologyAnnotationExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            ontologyAnnotationExplorer.setFilter(value);
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('synesis.ontology.annotation.filterActive', async () => {
+            const value = await vscode.window.showInputBox({
+                prompt: 'Filter ontology annotations by name (leave blank to show all)',
+                value: ontologyAnnotationExplorer.getFilter()
+            });
+
+            if (value === undefined) {
+                return;
+            }
+
+            ontologyAnnotationExplorer.setFilter(value);
         })
     );
 
@@ -335,6 +469,12 @@ function activate(context) {
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.code.goToDefinition', async (treeItem) => {
             if (!treeItem || !treeItem.code) {
+                return;
+            }
+
+            const ontologyDef = await findOntologyDefinition(treeItem.code);
+            if (ontologyDef) {
+                openLocation(ontologyDef.file, ontologyDef.line || 0, 0);
                 return;
             }
 
@@ -503,8 +643,11 @@ async function findSymbolPosition(treeItem) {
         return null;
     }
 
-    if (treeItem.occurrences && treeItem.occurrences.length > 0) {
-        const occ = treeItem.occurrences[0];
+    const occurrences = Array.isArray(treeItem.occurrences) ? treeItem.occurrences : [];
+    for (const occ of occurrences) {
+        if (!occ || !occ.file) {
+            continue;
+        }
         const uri = vscode.Uri.file(occ.file);
         return { uri, position: new vscode.Position(occ.line, occ.column || 0) };
     }
@@ -513,11 +656,44 @@ async function findSymbolPosition(treeItem) {
     for (const fileUri of files) {
         const doc = await vscode.workspace.openTextDocument(fileUri);
         const text = doc.getText();
-        const idx = text.indexOf(symbol);
+        let idx = text.indexOf(symbol);
+        if (idx < 0) {
+            idx = text.toLowerCase().indexOf(symbol.toLowerCase());
+        }
         if (idx >= 0) {
             const pos = doc.positionAt(idx);
             return { uri: fileUri, position: pos };
         }
+    }
+
+    return null;
+}
+
+async function findOntologyDefinition(code) {
+    if (!code || !dataService) {
+        return null;
+    }
+
+    const client = dataService.lspClient;
+    const lspReady = Boolean(client && typeof client.isReady === 'function' && client.isReady());
+    if (!lspReady) {
+        return null;
+    }
+
+    try {
+        const annotations = await dataService.getOntologyAnnotations();
+        const normalized = String(code).toLowerCase();
+        const match = (Array.isArray(annotations) ? annotations : []).find(
+            (entry) => String(entry.code || '').toLowerCase() === normalized
+        );
+        if (match && match.ontologyFile) {
+            return {
+                file: match.ontologyFile,
+                line: typeof match.ontologyLine === 'number' ? match.ontologyLine : 0
+            };
+        }
+    } catch (error) {
+        console.warn('findOntologyDefinition: failed to load ontology annotations:', error.message);
     }
 
     return null;
@@ -668,21 +844,25 @@ function setLspStatus(state, stats) {
 
     if (state === 'disabled') {
         lspStatusItem.text = `$(circle-slash) LSP Disabled (${commandLabel})`;
+        updateExplorerTitles('disabled');
         return;
     }
 
     if (state === 'loading') {
         lspStatusItem.text = `$(sync) LSP Loading (${commandLabel})`;
+        updateExplorerTitles('loading');
         return;
     }
 
     if (state === 'error') {
         lspStatusItem.text = `$(alert) LSP Error (${commandLabel})`;
+        updateExplorerTitles('error');
         return;
     }
 
     if (state === 'incompatible') {
         lspStatusItem.text = `$(alert) LSP Incompatível (${commandLabel})`;
+        updateExplorerTitles('incompatible');
         return;
     }
 
@@ -692,6 +872,164 @@ function setLspStatus(state, stats) {
         } else {
             lspStatusItem.text = `$(check) LSP Ready (${commandLabel})`;
         }
+        updateExplorerTitles('ready');
+    }
+}
+
+function validateLspCapabilities() {
+    if (!lspClient || !lspClient.client || !lspClient.client.initializeResult) {
+        console.warn('LSP client not initialized, skipping capability validation');
+        return;
+    }
+
+    const caps = lspClient.client.initializeResult.capabilities;
+    const missing = [];
+
+    console.log('=== LSP Capabilities Validation ===');
+    console.log('Capabilities:', JSON.stringify({
+        hover: !!caps.hoverProvider,
+        definition: !!caps.definitionProvider,
+        documentSymbol: !!caps.documentSymbolProvider,
+        rename: !!caps.renameProvider,
+        completion: !!caps.completionProvider
+    }, null, 2));
+
+    if (!caps.hoverProvider) {
+        missing.push('Hover');
+    }
+    if (!caps.definitionProvider) {
+        missing.push('Go to Definition');
+    }
+    if (!caps.documentSymbolProvider) {
+        missing.push('Document Symbols (required for Graph Viewer)');
+    }
+    if (!caps.renameProvider) {
+        missing.push('Rename');
+    }
+    if (!caps.completionProvider) {
+        missing.push('Completion');
+    }
+
+    if (missing.length > 0) {
+        const message = `⚠️ Synesis LSP is missing critical capabilities: ${missing.join(', ')}. ` +
+            `These features will NOT work. Please update synesis-lsp to v${MIN_LSP_VERSION}+ or later.`;
+
+        console.error(message);
+        vscode.window.showErrorMessage(message, 'Open Output').then(selection => {
+            if (selection === 'Open Output') {
+                vscode.commands.executeCommand('workbench.action.output.toggleOutput');
+            }
+        });
+    } else {
+        const successMessage = '✓ LSP capabilities validated successfully: Hover, Definition, DocumentSymbol, Rename, Completion';
+        console.log(successMessage);
+        console.log('All LSP features should work correctly.');
+    }
+}
+
+async function validateSynesisCustomMethods() {
+    if (!lspClient || !lspClient.isReady()) {
+        console.warn('LSP client not initialized, skipping Synesis method validation');
+        return;
+    }
+
+    const workspaceRoot = resolveWorkspaceRoot(vscode.window.activeTextEditor?.document);
+    const missing = [];
+    const legacyOnly = [];
+
+    for (const entry of SYNESIS_CUSTOM_METHODS) {
+        const params = buildSynesisMethodParams(entry.method, workspaceRoot);
+        const status = await trySynesisMethod(entry.method, params);
+
+        if (status === 'ok') {
+            continue;
+        }
+
+        if (status === 'not_found') {
+            let legacySupported = false;
+
+            for (const legacyMethod of entry.legacy || []) {
+                const legacyStatus = await trySynesisMethod(legacyMethod, params);
+                if (legacyStatus === 'ok') {
+                    legacySupported = true;
+                    break;
+                }
+            }
+
+            if (legacySupported) {
+                legacyOnly.push(entry.method);
+            } else {
+                missing.push(entry.method);
+                if (dataService && dataService.unsupportedMethods) {
+                    dataService.unsupportedMethods.add(entry.dataServiceMethod);
+                }
+            }
+            continue;
+        }
+
+        console.warn(`Synesis LSP method validation failed: ${entry.method}`);
+    }
+
+    if (missing.length > 0) {
+        setLspStatus('incompatible');
+        const message = `Synesis LSP is missing custom methods: ${missing.join(', ')}. ` +
+            `Please update synesis-lsp to v${MIN_LSP_VERSION}+ or later.`;
+        console.error(message);
+        vscode.window.showErrorMessage(message);
+    }
+
+    if (legacyOnly.length > 0) {
+        const message = `Synesis LSP is using legacy method names (${legacyOnly.join(', ')}). ` +
+            `Update synesis-lsp to v${MIN_LSP_VERSION}+ for full support.`;
+        console.warn(message);
+        vscode.window.showWarningMessage(message);
+    }
+}
+
+function buildSynesisMethodParams(method, workspaceRoot) {
+    const params = { workspaceRoot: workspaceRoot || '' };
+    if (method === 'synesis/getRelationGraph') {
+        params.bibref = '@placeholder';
+    }
+    return params;
+}
+
+async function trySynesisMethod(method, params) {
+    try {
+        await lspClient.sendRequest(method, params);
+        return 'ok';
+    } catch (error) {
+        if (isMethodNotFound(error)) {
+            return 'not_found';
+        }
+        console.warn(`Synesis LSP request failed for ${method}:`, error.message);
+        return 'error';
+    }
+}
+
+function isMethodNotFound(error) {
+    return Boolean(error && (error.code === -32601 || /Method Not Found/i.test(error.message)));
+}
+
+function updateExplorerTitles(status) {
+    const statusSuffix = {
+        'loading': ' (LSP Loading...)',
+        'ready': '',
+        'incompatible': ' (LSP Incompatible)',
+        'error': ' (LSP Error)',
+        'disabled': ''
+    };
+
+    const suffix = statusSuffix[status] || '';
+
+    if (referenceTreeView) {
+        referenceTreeView.title = `References${suffix}`;
+    }
+    if (codeTreeView) {
+        codeTreeView.title = `Codes${suffix}`;
+    }
+    if (relationTreeView) {
+        relationTreeView.title = `Relations${suffix}`;
     }
 }
 

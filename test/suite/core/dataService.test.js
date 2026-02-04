@@ -1,7 +1,7 @@
 /**
  * dataService.test.js - Testes unitários para DataService
  *
- * Foca em _trackLspNull e lógica de fallback.
+ * Foca em _trackLspNull e lógica LSP-only.
  */
 
 // Instalar mock do vscode antes de importar o módulo
@@ -29,26 +29,6 @@ function createMockLspClient({ isReady = true, responses = {} } = {}) {
     };
 }
 
-/**
- * Cria mocks mínimos para WorkspaceScanner e TemplateManager
- */
-function createMockScanner() {
-    return {
-        findProjectFile: async () => null,
-        findSynFiles: async () => [],
-        findSynoFiles: async () => [],
-        findTemplateFile: async () => null
-    };
-}
-
-function createMockTemplateManager() {
-    return {
-        loadTemplate: async () => ({}),
-        getTemplateInfo: () => null,
-        invalidateCache: () => {}
-    };
-}
-
 describe('DataService', () => {
     describe('_trackLspNull', () => {
         it('should call onLspIncompatible after 3 null responses', () => {
@@ -56,8 +36,6 @@ describe('DataService', () => {
 
             const service = new DataService({
                 lspClient: createMockLspClient(),
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager(),
                 onLspIncompatible: () => { incompatibleCalled = true; }
             });
 
@@ -80,8 +58,6 @@ describe('DataService', () => {
 
             const service = new DataService({
                 lspClient: createMockLspClient(),
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager(),
                 onLspIncompatible: () => { callCount += 1; }
             });
 
@@ -95,8 +71,6 @@ describe('DataService', () => {
         it('should not crash when onLspIncompatible is not provided', () => {
             const service = new DataService({
                 lspClient: createMockLspClient(),
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             // Should not throw
@@ -112,8 +86,6 @@ describe('DataService', () => {
         it('should detect error code -32601', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.strictEqual(service._isMethodNotFound({ code: -32601, message: 'err' }), true);
@@ -122,8 +94,6 @@ describe('DataService', () => {
         it('should detect "Method Not Found" in message', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.strictEqual(service._isMethodNotFound({ message: 'Method Not Found' }), true);
@@ -132,8 +102,6 @@ describe('DataService', () => {
         it('should return false for other errors', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.strictEqual(service._isMethodNotFound({ code: -32600, message: 'err' }), false);
@@ -145,8 +113,6 @@ describe('DataService', () => {
         it('should initialize lspNullCount and lspNullWarned', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.strictEqual(service._lspNullCount, 0);
@@ -156,8 +122,6 @@ describe('DataService', () => {
         it('should create lspProvider when lspClient is provided', () => {
             const service = new DataService({
                 lspClient: createMockLspClient(),
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.ok(service.lspProvider);
@@ -166,8 +130,6 @@ describe('DataService', () => {
         it('should set lspProvider to null when lspClient not provided', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
             });
 
             assert.strictEqual(service.lspProvider, null);
@@ -177,8 +139,6 @@ describe('DataService', () => {
             const callback = () => {};
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager(),
                 onLspIncompatible: callback
             });
 
@@ -188,8 +148,6 @@ describe('DataService', () => {
         it('should set onLspIncompatible to null for non-function values', () => {
             const service = new DataService({
                 lspClient: null,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager(),
                 onLspIncompatible: 'not a function'
             });
 
@@ -197,96 +155,32 @@ describe('DataService', () => {
         });
     });
 
-    describe('_tryLspThenLocal fallback', () => {
-        it('should fall back to local when LSP returns null', async () => {
+    describe('_callLsp behavior', () => {
+        it('should return empty result when LSP returns null', async () => {
             const mockLsp = createMockLspClient({
                 isReady: true,
                 responses: {
-                    'synesis/getReferences': null,
-                    'synesis/get_references': null
-                }
-            });
-
-            let localCalled = false;
-            const service = new DataService({
-                lspClient: mockLsp,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
-            });
-
-            // Override local provider for testing
-            service.localProvider.getReferences = async () => {
-                localCalled = true;
-                return [];
-            };
-
-            await service.getReferences();
-            assert.strictEqual(localCalled, true);
-        });
-
-        it('should use LSP result when available', async () => {
-            const expectedRefs = [{ bibref: '@test', itemCount: 1, occurrences: [] }];
-            const mockLsp = createMockLspClient({
-                isReady: true,
-                responses: {
-                    'synesis/getReferences': { success: true, references: [] }
+                    'synesis/getReferences': null
                 }
             });
 
             const service = new DataService({
-                lspClient: mockLsp,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
+                lspClient: mockLsp
             });
-
-            // The LSP returns empty array (not null), so local should NOT be called
-            let localCalled = false;
-            service.localProvider.getReferences = async () => {
-                localCalled = true;
-                return expectedRefs;
-            };
 
             const result = await service.getReferences();
-            assert.strictEqual(localCalled, false);
+            assert.deepStrictEqual(result, []);
         });
 
-        it('should fall back to local when LSP is not ready', async () => {
+        it('should return empty result when LSP is not ready', async () => {
             const mockLsp = createMockLspClient({ isReady: false });
 
-            let localCalled = false;
             const service = new DataService({
-                lspClient: mockLsp,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
+                lspClient: mockLsp
             });
 
-            service.localProvider.getReferences = async () => {
-                localCalled = true;
-                return [];
-            };
-
-            await service.getReferences();
-            assert.strictEqual(localCalled, true);
-        });
-
-        it('should fall back to local when LSP throws error', async () => {
-            const mockLsp = createMockLspClient({ isReady: true });
-            mockLsp.sendRequest = async () => { throw new Error('Connection lost'); };
-
-            let localCalled = false;
-            const service = new DataService({
-                lspClient: mockLsp,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
-            });
-
-            service.localProvider.getReferences = async () => {
-                localCalled = true;
-                return [];
-            };
-
-            await service.getReferences();
-            assert.strictEqual(localCalled, true);
+            const result = await service.getCodes();
+            assert.deepStrictEqual(result, []);
         });
 
         it('should mark method as unsupported on Method Not Found error', async () => {
@@ -298,15 +192,37 @@ describe('DataService', () => {
             };
 
             const service = new DataService({
-                lspClient: mockLsp,
-                workspaceScanner: createMockScanner(),
-                templateManager: createMockTemplateManager()
+                lspClient: mockLsp
             });
-
-            service.localProvider.getReferences = async () => [];
 
             await service.getReferences();
             assert.strictEqual(service.unsupportedMethods.has('getReferences'), true);
+        });
+
+        it('should use LSP result when available', async () => {
+            const mockLsp = createMockLspClient({
+                isReady: true,
+                responses: {
+                    'synesis/getReferences': {
+                        success: true,
+                        references: [
+                            {
+                                bibref: '@test',
+                                itemCount: 1,
+                                location: { file: 'test.syn', line: 1 }
+                            }
+                        ]
+                    }
+                }
+            });
+
+            const service = new DataService({
+                lspClient: mockLsp
+            });
+
+            const result = await service.getReferences();
+            assert.strictEqual(result.length, 1);
+            assert.strictEqual(result[0].bibref, '@test');
         });
     });
 });

@@ -10,7 +10,7 @@
  *     - getChildren: Retorna relacoes ou triplets
  *
  * Dependencias criticas:
- *     - DataService: Adapter LSP/local para dados normalizados
+ *     - DataService: LSP-only data access
  */
 
 const vscode = require('vscode');
@@ -20,6 +20,7 @@ class RelationExplorer {
         this.dataService = dataService;
         this.relations = new Map(); // relation -> [triplets]
         this.filterText = '';
+        this.placeholder = null;
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -30,9 +31,35 @@ class RelationExplorer {
      */
     async refresh() {
         this.relations.clear();
+        this.placeholder = null;
+
+        const lspStatus = this._getLspStatus();
+        if (lspStatus !== 'ready') {
+            const label = lspStatus === 'disabled' ? 'LSP disabled' : 'LSP not ready';
+            const description = lspStatus === 'disabled'
+                ? 'Synesis LSP is disabled in settings.'
+                : 'Waiting for Synesis LSP to initialize...';
+            this._setPlaceholder(label, description);
+            await this._setHasChains(false);
+            this._onDidChangeTreeData.fire();
+            return;
+        }
 
         try {
             const relations = await this.dataService.getRelations();
+            console.log('RelationExplorer.refresh: received', relations ? relations.length : 0, 'relation types');
+
+            if (relations && relations.length > 0) {
+                const firstRelation = relations[0];
+                console.log('RelationExplorer.refresh: First relation:', firstRelation.relation);
+                console.log('RelationExplorer.refresh: First relation triplets:', firstRelation.triplets.length);
+                if (firstRelation.triplets.length > 0) {
+                    const firstTriplet = firstRelation.triplets[0];
+                    console.log('RelationExplorer.refresh: First triplet file:', firstTriplet.file);
+                    console.log('RelationExplorer.refresh: First triplet line:', firstTriplet.line);
+                    console.log('RelationExplorer.refresh: First triplet:', `${firstTriplet.from} -> ${firstTriplet.to}`);
+                }
+            }
 
             for (const entry of relations) {
                 this.relations.set(entry.relation, entry.triplets);
@@ -53,6 +80,10 @@ class RelationExplorer {
 
     async getChildren(element) {
         if (!element) {
+            if (this.placeholder) {
+                return [this.placeholder];
+            }
+
             const items = [];
             const filter = this.filterText;
             for (const [relation, triplets] of this.relations.entries()) {
@@ -64,11 +95,30 @@ class RelationExplorer {
             return items.sort((a, b) => a.relation.localeCompare(b.relation));
         }
 
+        if (element.isPlaceholder) {
+            return [];
+        }
+
         return element.triplets.map(triplet => new TripletTreeItem(triplet));
     }
 
     async _setHasChains(value) {
         await vscode.commands.executeCommand('setContext', 'synesis.hasChains', value);
+    }
+
+    _getLspStatus() {
+        const client = this.dataService && this.dataService.lspClient;
+        if (!client) {
+            return 'disabled';
+        }
+        if (typeof client.isReady !== 'function' || !client.isReady()) {
+            return 'loading';
+        }
+        return 'ready';
+    }
+
+    _setPlaceholder(label, description) {
+        this.placeholder = new StatusTreeItem(label, description);
     }
 
     /**
@@ -77,6 +127,7 @@ class RelationExplorer {
      */
     setFilter(text) {
         this.filterText = (text || '').trim().toLowerCase();
+        this._setFilterActive(this.filterText.length > 0);
         this._onDidChangeTreeData.fire();
     }
 
@@ -86,6 +137,10 @@ class RelationExplorer {
      */
     getFilter() {
         return this.filterText;
+    }
+
+    async _setFilterActive(value) {
+        await vscode.commands.executeCommand('setContext', 'synesis.relation.filterActive', value);
     }
 }
 
@@ -107,11 +162,19 @@ class TripletTreeItem extends vscode.TreeItem {
 
         super(label, vscode.TreeItemCollapsibleState.None);
 
-        this.description = triplet.type;
-        this.iconPath = new vscode.ThemeIcon('file');
-        this.tooltip = triplet.file || '';
+        // Validar se file existe
+        if (!triplet.file) {
+            console.warn('TripletTreeItem: triplet.file is null or undefined', triplet);
+            this.description = `${triplet.type} (no location)`;
+        } else {
+            this.description = triplet.type;
+        }
+
+        this.iconPath = new vscode.ThemeIcon(triplet.file ? 'file' : 'question');
+        this.tooltip = triplet.file || '<location not available>';
         this.contextValue = 'relationTriplet';
 
+        // Só adicionar comando se file existir
         if (triplet.file) {
             this.command = {
                 command: 'synesis.openLocation',
@@ -119,6 +182,17 @@ class TripletTreeItem extends vscode.TreeItem {
                 arguments: [triplet.file, triplet.line, triplet.column]
             };
         }
+    }
+}
+
+class StatusTreeItem extends vscode.TreeItem {
+    constructor(label, description) {
+        super(label, vscode.TreeItemCollapsibleState.None);
+        this.description = description || '';
+        this.tooltip = description || '';
+        this.iconPath = new vscode.ThemeIcon('sync');
+        this.contextValue = 'status';
+        this.isPlaceholder = true;
     }
 }
 

@@ -2,7 +2,7 @@
   "name": "synesis-explorer",
   "displayName": "Synesis Explorer",
   "description": "VSCode extension for exploring Synesis knowledge synthesis files",
-  "version": "0.4.1",
+  "version": "0.5.2",
   "publisher": "synesis",
   "repository": {
     "type": "git",
@@ -17,8 +17,7 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:synesis",
-    "workspaceContains:**/*.synp"
+    "workspaceContains:*.synp"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -73,12 +72,13 @@
         },
         {
           "id": "synesisCodeExplorer",
-          "name": "Codes"
+          "name": "Codes",
+          "when": "synesis.hasCodes"
         },
         {
           "id": "synesisRelationExplorer",
           "name": "Relations",
-          "when": "synesis.hasChains"
+          "when": "synesis.hasChains && synesis.activeFileKind == syn"
         },
         {
           "id": "synesisOntologyTopicsExplorer",
@@ -108,6 +108,14 @@
         "icon": "$(filter)"
       },
       {
+        "command": "synesis.reference.filterActive",
+        "title": "Filter References",
+        "icon": {
+          "light": "icons/filter-red.svg",
+          "dark": "icons/filter-red.svg"
+        }
+      },
+      {
         "command": "synesis.code.refresh",
         "title": "Refresh Codes",
         "icon": "$(refresh)"
@@ -116,6 +124,14 @@
         "command": "synesis.code.filter",
         "title": "Filter Codes",
         "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.code.filterActive",
+        "title": "Filter Codes",
+        "icon": {
+          "light": "icons/filter-red.svg",
+          "dark": "icons/filter-red.svg"
+        }
       },
       {
         "command": "synesis.relation.refresh",
@@ -128,6 +144,14 @@
         "icon": "$(filter)"
       },
       {
+        "command": "synesis.relation.filterActive",
+        "title": "Filter Relations",
+        "icon": {
+          "light": "icons/filter-red.svg",
+          "dark": "icons/filter-red.svg"
+        }
+      },
+      {
         "command": "synesis.ontology.refresh",
         "title": "Refresh Ontology Topics",
         "icon": "$(refresh)"
@@ -138,9 +162,30 @@
         "icon": "$(filter)"
       },
       {
+        "command": "synesis.ontology.filterActive",
+        "title": "Filter Ontology Topics",
+        "icon": {
+          "light": "icons/filter-red.svg",
+          "dark": "icons/filter-red.svg"
+        }
+      },
+      {
         "command": "synesis.ontology.annotation.refresh",
         "title": "Refresh Ontology (Annotations)",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "synesis.ontology.annotation.filter",
+        "title": "Filter Ontology (Annotations)",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "synesis.ontology.annotation.filterActive",
+        "title": "Filter Ontology (Annotations)",
+        "icon": {
+          "light": "icons/filter-red.svg",
+          "dark": "icons/filter-red.svg"
+        }
       },
       {
         "command": "synesis.showGraph",
@@ -173,7 +218,7 @@
         "command": "synesis.showGraph",
         "key": "ctrl+alt+g",
         "mac": "cmd+shift+g",
-        "when": "editorTextFocus && editorLangId == synesis"
+        "when": "editorTextFocus && editorLangId == synesis && synesis.hasChains"
       },
       {
         "command": "synesis.showAbstract",
@@ -191,7 +236,12 @@
         },
         {
           "command": "synesis.reference.filter",
-          "when": "view == synesisReferenceExplorer",
+          "when": "view == synesisReferenceExplorer && !synesis.reference.filterActive",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.reference.filterActive",
+          "when": "view == synesisReferenceExplorer && synesis.reference.filterActive",
           "group": "navigation"
         },
         {
@@ -201,7 +251,12 @@
         },
         {
           "command": "synesis.code.filter",
-          "when": "view == synesisCodeExplorer",
+          "when": "view == synesisCodeExplorer && !synesis.code.filterActive",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.code.filterActive",
+          "when": "view == synesisCodeExplorer && synesis.code.filterActive",
           "group": "navigation"
         },
         {
@@ -211,7 +266,12 @@
         },
         {
           "command": "synesis.relation.filter",
-          "when": "view == synesisRelationExplorer && synesis.hasChains",
+          "when": "view == synesisRelationExplorer && synesis.hasChains && !synesis.relation.filterActive",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.relation.filterActive",
+          "when": "view == synesisRelationExplorer && synesis.hasChains && synesis.relation.filterActive",
           "group": "navigation"
         },
         {
@@ -221,13 +281,50 @@
         },
         {
           "command": "synesis.ontology.filter",
-          "when": "view == synesisOntologyTopicsExplorer && synesis.hasTopics && synesis.activeFileKind == syno",
+          "when": "view == synesisOntologyTopicsExplorer && synesis.hasTopics && synesis.activeFileKind == syno && !synesis.ontology.filterActive",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.filterActive",
+          "when": "view == synesisOntologyTopicsExplorer && synesis.hasTopics && synesis.activeFileKind == syno && synesis.ontology.filterActive",
           "group": "navigation"
         },
         {
           "command": "synesis.ontology.annotation.refresh",
           "when": "view == synesisOntologyAnnotationExplorer && synesis.hasOntologyAnnotations && synesis.activeFileKind == syn",
           "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.annotation.filter",
+          "when": "view == synesisOntologyAnnotationExplorer && synesis.hasOntologyAnnotations && synesis.activeFileKind == syn && !synesis.ontology.annotation.filterActive",
+          "group": "navigation"
+        },
+        {
+          "command": "synesis.ontology.annotation.filterActive",
+          "when": "view == synesisOntologyAnnotationExplorer && synesis.hasOntologyAnnotations && synesis.activeFileKind == syn && synesis.ontology.annotation.filterActive",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "synesis.relation.filterActive",
+          "when": "false"
+        },
+        {
+          "command": "synesis.reference.filterActive",
+          "when": "false"
+        },
+        {
+          "command": "synesis.code.filterActive",
+          "when": "false"
+        },
+        {
+          "command": "synesis.ontology.filterActive",
+          "when": "false"
+        },
+        {
+          "command": "synesis.ontology.annotation.filterActive",
+          "when": "false"
         }
       ],
       "view/item/context": [

@@ -5,6 +5,83 @@ All notable changes to the Synesis Explorer extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-02-03
+
+### Fixed
+- **Relations/Codes/Ontology**: Improved path normalization (including `file://` URIs) to restore navigation to source locations.
+- **Go to Definition**: Uses first occurrence with a valid file before falling back to text search.
+
+### Changed
+- **Ontology Explorers**: Now consume LSP-only data (`getOntologyTopics` / `getOntologyAnnotations`).
+- **LSP Validation**: Added custom method checks for ontology endpoints.
+
+## [0.5.1] - 2026-02-03
+
+### Fixed
+- **SynesisParser**: Fixed duplicate field handling - fields with same name now correctly accumulate in arrays instead of overwriting
+- **AbstractViewer**: Fixed display of multiple notes and chains - now creates separate excerpts for each (note, chain) pair instead of concatenating all values
+- **OntologyAnnotationExplorer**: Fixed crash when processing array field values - added proper array handling for duplicate fields
+- **Code Explorer**: Fixed non-clickable occurrences - added null checks for file paths and fallback display when location unavailable
+- **Relation Explorer**: Fixed non-clickable triplets - added null checks and visual feedback (question mark icon) for items without location
+- **GraphViewer**: Added local fallback for bibref extraction when LSP not available - now works without LSP using SynesisParser
+- **Explorer Titles**: Added visual feedback showing "(LSP Loading...)" during LSP initialization
+
+### Added
+- **Comprehensive Diagnostic Logging**: Added extensive console logging in DataService, CodeExplorer, RelationExplorer for troubleshooting
+  - Logs workspaceRoot, raw LSP data, and processed file paths
+  - Warnings for null/undefined file paths
+  - Helps identify LSP data issues quickly
+- **Null-Safe TreeItems**: Code and Relation explorers now handle missing file locations gracefully
+- **Visual Indicators**: Items without locations show question mark icon and "(no location)" description
+- **Documentation**: Created BUGS_FIXED.md documenting all issues and fixes, RELOAD_EXTENSION.md with testing instructions
+
+### Changed
+- **Field Value Collection**: `collectFieldValues()` in AbstractViewer now properly handles both string and array field values
+- **Explorer Error Handling**: Explorers now continue working even when some items lack location data
+- **Path Resolution**: Enhanced path resolution logging in DataService for easier debugging
+
+### Technical Details
+- Modified `_addFieldValue()` in SynesisParser to accumulate duplicate fields into arrays
+- Updated `collectFieldValues()` to iterate over array values when present
+- Added `_findBibrefLocal()` to GraphViewer with three fallback strategies (ITEM → SOURCE → inline)
+- Enhanced OccurrenceTreeItem and TripletTreeItem with null checks before accessing file paths
+- Added `updateExplorerTitles()` function for LSP status feedback
+
+### Breaking Changes
+None - all changes are backward compatible
+
+### Known Issues
+- GraphViewer may show all chains from project instead of filtering by bibref (LSP server issue, not extension)
+
+## [0.5.0] - 2026-02-02
+
+### Added
+- **LSP Strict Mode Now Default**: `synesisExplorer.lsp.strict` now defaults to `true` for LSP-only operation
+- **New LSP Endpoints Support**: Added DataService methods for `synesis/getOntologyTopics` and `synesis/getOntologyAnnotations`
+- **LSP-Exclusive Methods**: Ontology methods added to exclusive methods set (no regex fallback)
+- **Deprecation Warnings**: LocalRegexProvider logs warnings when fallback to regex parsing occurs
+- **LSP Capabilities Validation**: Automatic validation of LSP server capabilities on startup with detailed warnings
+- **Enhanced Debug Logging**: Comprehensive logging in DataService and GraphViewer for troubleshooting
+- **Troubleshooting Guide**: New `LSP_TROUBLESHOOTING.md` with diagnostic checklist and common solutions
+
+### Changed
+- **100% LSP Coverage**: All data retrieval now operates via LSP by default
+- **No Regex Fallback by Default**: Local regex parsing only used if LSP unavailable and strict mode disabled
+- **Improved Error Messages**: Clearer warnings when LSP is required but unavailable
+- **Configuration Description**: Updated `lsp.strict` setting description for better clarity
+
+### Technical Notes
+- DataService now includes `getOntologyTopics()` and `getOntologyAnnotations()` in public API
+- Both new methods added to `DEFAULT_LSP_EXCLUSIVE_METHODS` constant
+- LocalRegexProvider stub methods emit console warnings (deprecated)
+- `_resolveLspMethodName()` and `_emptyResultFor()` updated to support new methods
+- Requires Synesis LSP v0.13.0+ for full functionality
+
+### Migration Guide
+- Users with `lsp.strict: false` in settings will need to update to `lsp.strict: true` or ensure LSP is properly installed
+- Existing installations with LSP v0.13.0+ will work seamlessly
+- Fallback to regex still available by setting `synesisExplorer.lsp.strict: false`
+
 ## [0.4.1] - 2026-02-01
 
 ### Added
@@ -96,6 +173,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fallback to default templates when `.synt` not available
 
 ## [Unreleased]
+
+### Changed
+- Removed local regex fallback; all data requests are LSP-only
+- Removed `synesisExplorer.lsp.strict` setting (LSP is always required)
 
 ### Planned
 - Smart snippets for ITEM/ONTOLOGY blocks

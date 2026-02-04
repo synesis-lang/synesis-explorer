@@ -37,7 +37,60 @@ function getLineColumn(lineOffsets, offset) {
     return { line, column };
 }
 
+function escapeRegex(text) {
+    return String(text || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function findFieldValueInfo(blockContent, fieldName) {
+    const escapedName = escapeRegex(fieldName);
+    const pattern = new RegExp(
+        `^\\s*${escapedName}\\s*:\\s*([\\s\\S]*?)(?=^\\s*[\\p{L}\\p{N}._-]+\\s*:|\\s*(?![\\s\\S]))`,
+        'gmu'
+    );
+
+    const match = pattern.exec(blockContent);
+    if (!match) {
+        return null;
+    }
+
+    const value = match[1];
+    const valueStart = match.index + match[0].length - value.length;
+    return { value, valueStart };
+}
+
+function findTokenOffset(value, token) {
+    const escaped = escapeRegex(token);
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}._-])(${escaped})(?=$|[^\\p{L}\\p{N}._-])`, 'u');
+    const match = pattern.exec(value);
+    if (!match) {
+        return null;
+    }
+    return match.index + match[1].length;
+}
+
+function findTokenPosition(item, fieldName, token, lineOffsets) {
+    if (!item.blockContent || typeof item.blockOffset !== 'number') {
+        return null;
+    }
+
+    const fieldInfo = findFieldValueInfo(item.blockContent, fieldName);
+    if (!fieldInfo) {
+        return null;
+    }
+
+    const tokenOffset = findTokenOffset(fieldInfo.value, token);
+    if (tokenOffset === null) {
+        return null;
+    }
+
+    const absoluteOffset = item.blockOffset + fieldInfo.valueStart + tokenOffset;
+    return getLineColumn(lineOffsets, absoluteOffset);
+}
+
 module.exports = {
     buildLineOffsets,
-    getLineColumn
+    getLineColumn,
+    findTokenPosition,
+    findFieldValueInfo,
+    findTokenOffset
 };

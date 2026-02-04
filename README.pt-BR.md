@@ -28,7 +28,8 @@ Suporte completo ao Language Server Protocol para edição e navegação avança
 - **Renomear Símbolo**: `F2` para renomear códigos ou referências em todos os arquivos
 - **Inlay Hints**: Autor e ano exibidos inline após `@bibref`
 - **Símbolos do Documento**: Outline view com hierarquia SOURCE/ITEM/ONTOLOGY
-- Fallback automático para parsing regex local quando o LSP não está disponível
+- Operacao somente LSP para dados (sem fallback regex)
+- Exploradores exibem placeholder enquanto o LSP inicia ou quando esta desativado
 
 ### Reference Explorer (Explorador de Referências)
 
@@ -218,6 +219,10 @@ executável standalone em outro local, aponte a configuração para ele.
 }
 ```
 
+O Synesis Explorer opera em modo somente-LSP para dados.
+Se o servidor ainda esta inicializando, os explorers exibem um placeholder ate o LSP ficar pronto.
+Se o LSP estiver desativado, os explorers exibem um placeholder de LSP desativado.
+
 ### Ativando Ícones de Arquivo
 
 1. Abra as Configurações do VSCode
@@ -244,7 +249,7 @@ Synesis-Explorer/
 │   ├── lsp/               # Cliente LSP
 │   │   └── synesisClient.js
 │   ├── services/          # Serviços de dados
-│   │   └── dataService.js # Adapter: LSP vs regex local
+│   │   └── dataService.js # Adapter: acesso LSP-only
 │   ├── parsers/           # Parsers de arquivo
 │   │   ├── synesisParser.js
 │   │   ├── ontologyParser.js

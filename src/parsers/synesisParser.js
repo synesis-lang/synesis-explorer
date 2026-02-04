@@ -54,7 +54,8 @@ class SynesisParser {
             const blockContent = match[2];
             const startOffset = match.index;
             const endOffset = match.index + match[0].length;
-            const blockOffset = match.index + match[0].indexOf(blockContent);
+            const bibrefEnd = match[0].indexOf(match[1]) + match[1].length;
+            const blockOffset = match.index + bibrefEnd;
             const line = this._getLineNumber(content, match.index);
 
             // Extrair campos do bloco
@@ -104,7 +105,8 @@ class SynesisParser {
             const blockContent = match[2];
             const startOffset = match.index;
             const endOffset = match.index + match[0].length;
-            const blockOffset = match.index + match[0].indexOf(blockContent);
+            const bibrefEnd = match[0].indexOf(match[1]) + match[1].length;
+            const blockOffset = match.index + bibrefEnd;
             const line = this._getLineNumber(content, match.index);
 
             // Extrair campos do bloco
@@ -155,7 +157,7 @@ class SynesisParser {
             if (fieldMatch) {
                 // Salva campo anterior se existir
                 if (currentField) {
-                    fields[currentField] = currentValue.join('\n').trim();
+                    this._addFieldValue(fields, currentField, currentValue.join('\n').trim());
                 }
 
                 // Inicia novo campo
@@ -169,10 +171,34 @@ class SynesisParser {
 
         // Salva último campo
         if (currentField) {
-            fields[currentField] = currentValue.join('\n').trim();
+            this._addFieldValue(fields, currentField, currentValue.join('\n').trim());
         }
 
         return fields;
+    }
+
+    /**
+     * Adiciona valor a um campo, suportando campos duplicados
+     * @private
+     * @param {Object} fields - Objeto de campos
+     * @param {string} fieldName - Nome do campo
+     * @param {string} value - Valor a adicionar
+     */
+    _addFieldValue(fields, fieldName, value) {
+        if (!value) {
+            return;
+        }
+
+        if (!fields[fieldName]) {
+            // Primeiro valor: adiciona diretamente
+            fields[fieldName] = value;
+        } else if (Array.isArray(fields[fieldName])) {
+            // Já é array: adiciona ao array
+            fields[fieldName].push(value);
+        } else {
+            // Segundo valor: converte para array
+            fields[fieldName] = [fields[fieldName], value];
+        }
     }
 
     /**

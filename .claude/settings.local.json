@@ -11,7 +11,10 @@
       "Bash(npm run build:*)",
       "Bash(powershell:*)",
       "Bash(xargs ls:*)",
-      "Bash(node test/runTest.js:*)"
+      "Bash(node test/runTest.js:*)",
+      "Bash(dir:*)",
+      "Bash(python:*)",
+      "Bash(node:*)"
     ]
   }
 }

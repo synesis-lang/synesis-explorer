@@ -1,151 +1,57 @@
 /**
- * ontologyExplorer.js - TreeDataProvider para navegacao de topicos de ontologia
+ * ontologyExplorer.js - TreeDataProvider para topicos de ontologia (via LSP)
  *
  * Proposito:
- *     Lista valores definidos em campos TOPIC, ORDERED e ENUMERATED
- *     de blocos ONTOLOGY (.syno), agrupando por campo.
- *
- * Componentes principais:
- *     - refresh: Escaneia workspace e atualiza indice de topicos
- *     - getChildren: Hierarquia (campo -> topico -> ocorrencias)
+ *     Lista topicos da ontologia retornados pelo LSP (hierarquia).
+ *     Permite navegacao para a definicao em .syno.
  *
  * Dependencias criticas:
- *     - TemplateManager: carregamento do template para identificar TOPIC
- *     - OntologyParser: parse de blocos ONTOLOGY em .syno
+ *     - DataService: LSP-only data access
  */
 
+const path = require('path');
 const vscode = require('vscode');
-const OntologyParser = require('../../parsers/ontologyParser');
-const FieldRegistry = require('../../core/fieldRegistry');
 
 class OntologyExplorer {
-    constructor(workspaceScanner, templateManager) {
-        this.scanner = workspaceScanner;
-        this.templateManager = templateManager;
-        this.parser = new OntologyParser();
-        this.fieldValues = new Map(); // fieldName -> Map(value -> {occurrences, sortKey})
-        this.fieldTypes = new Map(); // fieldName -> type
-        this.fieldValueDefinitions = new Map(); // fieldName -> {byIndex, byLabel}
+    constructor(dataService) {
+        this.dataService = dataService;
+        this.topics = [];
         this.filterText = '';
+        this.placeholder = null;
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
     }
 
     /**
-     * Escaneia workspace e atualiza indice de topicos
+     * Obtém tópicos via DataService e atualiza índice
      */
     async refresh() {
-        this.fieldValues.clear();
-        this.fieldTypes.clear();
-        this.fieldValueDefinitions.clear();
+        this.topics = [];
+        this.placeholder = null;
+
+        const lspStatus = this._getLspStatus();
+        if (lspStatus !== 'ready') {
+            const label = lspStatus === 'disabled' ? 'LSP disabled' : 'LSP not ready';
+            const description = lspStatus === 'disabled'
+                ? 'Synesis LSP is disabled in settings.'
+                : 'Waiting for Synesis LSP to initialize...';
+            this._setPlaceholder(label, description);
+            await this._setHasTopics(false);
+            this._onDidChangeTreeData.fire();
+            return;
+        }
 
         try {
-            const projectUri = await this.scanner.findProjectFile();
-            if (!projectUri) {
-                await this._setHasTopics(false);
-                this._onDidChangeTreeData.fire();
-                return;
-            }
-
-            const registry = await this.templateManager.loadTemplate(projectUri);
-            const fieldRegistry = new FieldRegistry(registry);
-            const topicFields = fieldRegistry.getTopicFields();
-            const orderedFields = fieldRegistry.getOrderedFields();
-            const enumeratedFields = fieldRegistry.getEnumeratedFields();
-            const fieldTypes = new Map();
-
-            for (const name of topicFields) {
-                fieldTypes.set(name, 'TOPIC');
-            }
-            for (const name of orderedFields) {
-                fieldTypes.set(name, 'ORDERED');
-            }
-            for (const name of enumeratedFields) {
-                fieldTypes.set(name, 'ENUMERATED');
-            }
-
-            this.fieldTypes = fieldTypes;
-            this.fieldValueDefinitions = this._buildFieldValueDefinitions(registry, fieldTypes);
-            const hasTopics = fieldTypes.size > 0;
-
-            await this._setHasTopics(hasTopics);
-            if (!hasTopics) {
-                this._onDidChangeTreeData.fire();
-                return;
-            }
-
-            const synoFiles = await this.scanner.findSynoFiles(projectUri);
-            for (const fileUri of synoFiles) {
-                await this._scanFile(fileUri, fieldTypes);
-            }
-
+            const topics = await this.dataService.getOntologyTopics();
+            this.topics = Array.isArray(topics) ? topics : [];
+            await this._setHasTopics(this.topics.length > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error scanning ontology topics:', error);
+            console.error('Error loading ontology topics from LSP:', error);
             await this._setHasTopics(false);
-            vscode.window.showErrorMessage(`Failed to scan ontology topics: ${error.message}`);
+            vscode.window.showErrorMessage(`Failed to load ontology topics: ${error.message}`);
         }
-    }
-
-    /**
-     * Escaneia um arquivo .syno individual
-     * @private
-     */
-    async _scanFile(fileUri, fieldTypes) {
-        const content = await vscode.workspace.fs.readFile(fileUri);
-        const text = content.toString();
-        const filePath = fileUri.fsPath;
-
-        const ontologies = this.parser.parseOntologyBlocks(text, filePath);
-
-        for (const ontology of ontologies) {
-            for (const entry of ontology.fieldEntries) {
-                if (!fieldTypes.has(entry.name)) {
-                    continue;
-                }
-
-                const values = this._splitFieldValues(entry.value);
-                for (const value of values) {
-                    const resolved = this._resolveFieldValue(entry.name, value);
-                    this._addFieldValue(entry.name, resolved.displayValue, resolved.sortKey, {
-                        concept: ontology.concept,
-                        file: filePath,
-                        line: entry.line,
-                        column: entry.column,
-                        field: entry.name,
-                        topic: value
-                    });
-                }
-            }
-        }
-    }
-
-    _splitFieldValues(value) {
-        if (!value) {
-            return [];
-        }
-
-        return value
-            .split(',')
-            .map(part => part.trim())
-            .filter(Boolean);
-    }
-
-    _addFieldValue(fieldName, fieldValue, sortKey, occurrence) {
-        if (!this.fieldValues.has(fieldName)) {
-            this.fieldValues.set(fieldName, new Map());
-        }
-
-        const fieldMap = this.fieldValues.get(fieldName);
-        if (!fieldMap.has(fieldValue)) {
-            fieldMap.set(fieldValue, {
-                occurrences: [],
-                sortKey
-            });
-        }
-
-        fieldMap.get(fieldValue).occurrences.push(occurrence);
     }
 
     getTreeItem(element) {
@@ -154,75 +60,47 @@ class OntologyExplorer {
 
     async getChildren(element) {
         if (!element) {
-            const items = [];
-            const filter = this.filterText;
-
-            for (const [fieldName, topicMap] of this.fieldValues.entries()) {
-                if (filter && !this._fieldHasMatch(fieldName, topicMap, filter)) {
-                    continue;
-                }
-                items.push(new FieldTreeItem(fieldName, this.fieldTypes.get(fieldName), topicMap));
+            if (this.placeholder) {
+                return [this.placeholder];
             }
 
-            return items.sort((a, b) => a.fieldName.localeCompare(b.fieldName));
+            const filtered = this._filterTopics(this.topics, this.filterText);
+            return filtered.map(topic => new TopicTreeItem(topic));
         }
 
-        if (element instanceof FieldTreeItem) {
-            const topics = [];
-            const filter = this.filterText;
-            const fieldMatch = filter && element.fieldName.toLowerCase().includes(filter);
-
-            for (const [topicValue, entry] of element.valueMap.entries()) {
-                if (filter && !fieldMatch && !topicValue.toLowerCase().includes(filter)) {
-                    continue;
-                }
-                topics.push(new ValueTreeItem(element.fieldName, topicValue, entry.occurrences, entry.sortKey));
-            }
-
-            return topics.sort((a, b) => {
-                const aKey = a.sortKey;
-                const bKey = b.sortKey;
-                if (aKey !== null && bKey !== null && aKey !== bKey) {
-                    return aKey - bKey;
-                }
-                if (aKey !== null && bKey === null) {
-                    return -1;
-                }
-                if (aKey === null && bKey !== null) {
-                    return 1;
-                }
-                return a.topicValue.localeCompare(b.topicValue);
-            });
+        if (element.isPlaceholder) {
+            return [];
         }
 
-        return element.occurrences.map(occ => new OccurrenceTreeItem(occ));
-    }
-
-    _fieldHasMatch(fieldName, topicMap, filter) {
-        const lower = filter.toLowerCase();
-        if (fieldName.toLowerCase().includes(lower)) {
-            return true;
-        }
-
-        for (const topicValue of topicMap.keys()) {
-            if (topicValue.toLowerCase().includes(lower)) {
-                return true;
-            }
-        }
-
-        return false;
+        return (element.children || []).map(child => new TopicTreeItem(child));
     }
 
     async _setHasTopics(value) {
         await vscode.commands.executeCommand('setContext', 'synesis.hasTopics', value);
     }
 
+    _getLspStatus() {
+        const client = this.dataService && this.dataService.lspClient;
+        if (!client) {
+            return 'disabled';
+        }
+        if (typeof client.isReady !== 'function' || !client.isReady()) {
+            return 'loading';
+        }
+        return 'ready';
+    }
+
+    _setPlaceholder(label, description) {
+        this.placeholder = new StatusTreeItem(label, description);
+    }
+
     /**
-     * Atualiza o filtro por topico
+     * Atualiza o filtro por tópico
      * @param {string} text
      */
     setFilter(text) {
         this.filterText = (text || '').trim().toLowerCase();
+        this._setFilterActive(this.filterText.length > 0);
         this._onDidChangeTreeData.fire();
     }
 
@@ -234,121 +112,82 @@ class OntologyExplorer {
         return this.filterText;
     }
 
-    _buildFieldValueDefinitions(registry, fieldTypes) {
-        const definitions = new Map();
+    async _setFilterActive(value) {
+        await vscode.commands.executeCommand('setContext', 'synesis.ontology.filterActive', value);
+    }
 
-        for (const [fieldName, fieldType] of fieldTypes.entries()) {
-            const def = registry[fieldName];
-            const values = Array.isArray(def?.values) ? def.values : [];
-            if (!values.length) {
+    _filterTopics(topics, filterText) {
+        if (!filterText) {
+            return topics.filter(topic => !this._isNoiseTopic(topic));
+        }
+
+        const lowered = filterText.toLowerCase();
+        const result = [];
+
+        for (const topic of topics) {
+            const name = String(topic.name || '');
+            if (this._isNoiseTopic(topic)) {
                 continue;
             }
+            const nameMatch = name.toLowerCase().includes(lowered);
+            const children = Array.isArray(topic.children) ? topic.children : [];
+            const filteredChildren = this._filterTopics(children, filterText);
 
-            const byIndex = new Map();
-            const byLabel = new Map();
-
-            for (const value of values) {
-                const label = value && typeof value.label === 'string' ? value.label : null;
-                const index = typeof value?.index === 'number' ? value.index : null;
-
-                if (label) {
-                    byLabel.set(label, { index, label });
-                }
-
-                if (index !== null && !Number.isNaN(index) && label) {
-                    if (!byIndex.has(index)) {
-                        byIndex.set(index, label);
-                    }
-                }
+            if (nameMatch || filteredChildren.length > 0) {
+                result.push({
+                    ...topic,
+                    children: filteredChildren
+                });
             }
-
-            definitions.set(fieldName, {
-                fieldType,
-                byIndex,
-                byLabel
-            });
         }
 
-        return definitions;
+        return result;
     }
 
-    _resolveFieldValue(fieldName, rawValue) {
-        const text = String(rawValue || '').trim();
-        const fieldType = this.fieldTypes.get(fieldName);
-        const definition = this.fieldValueDefinitions.get(fieldName);
-        const numericValue = this._parseNumericValue(text);
-        let index = null;
-        let label = text;
-
-        if (definition) {
-            if (numericValue !== null && definition.byIndex.has(numericValue)) {
-                index = numericValue;
-                label = definition.byIndex.get(numericValue);
-            } else if (definition.byLabel.has(text)) {
-                const entry = definition.byLabel.get(text);
-                label = entry.label;
-                if (entry.index !== null && entry.index !== undefined) {
-                    index = entry.index;
-                }
-            } else if (numericValue !== null && (fieldType === 'ORDERED' || fieldType === 'ENUMERATED')) {
-                index = numericValue;
-            }
-        } else if (numericValue !== null && (fieldType === 'ORDERED' || fieldType === 'ENUMERATED')) {
-            index = numericValue;
-        }
-
-        const displayValue = index !== null ? `[${index}] ${label}` : label;
-        return { displayValue, sortKey: index };
-    }
-
-    _parseNumericValue(text) {
-        if (!text || !/^\d+$/.test(text)) {
-            return null;
-        }
-
-        const parsed = Number.parseInt(text, 10);
-        return Number.isNaN(parsed) ? null : parsed;
+    _isNoiseTopic(topic) {
+        const name = String(topic && topic.name ? topic.name : '').trim().toUpperCase();
+        return name === 'END ONTOLOGY' || name.startsWith('END ONTOLOGY');
     }
 }
 
-class FieldTreeItem extends vscode.TreeItem {
-    constructor(fieldName, fieldType, valueMap) {
-        super(fieldName, vscode.TreeItemCollapsibleState.Collapsed);
+class TopicTreeItem extends vscode.TreeItem {
+    constructor(topic) {
+        const children = Array.isArray(topic.children) ? topic.children : [];
+        const state = children.length > 0
+            ? vscode.TreeItemCollapsibleState.Collapsed
+            : vscode.TreeItemCollapsibleState.None;
 
-        this.fieldName = fieldName;
-        this.fieldType = fieldType || '';
-        this.valueMap = valueMap;
-        this.description = `${this.fieldType} (${valueMap.size} value(s))`;
-        this.iconPath = new vscode.ThemeIcon('organization');
-        this.contextValue = 'ontologyTopicField';
+        const label = topic.name || '<unnamed>';
+        super(label, state);
+
+        this.children = children;
+        this.contextValue = 'ontologyTopic';
+        this.iconPath = new vscode.ThemeIcon('symbol-structure');
+
+        if (topic.file) {
+            const fileName = path.basename(topic.file);
+            const lineLabel = typeof topic.line === 'number' && topic.line >= 0
+                ? topic.line + 1
+                : '?';
+            this.description = `${fileName}:${lineLabel}`;
+            this.tooltip = topic.file;
+            this.command = {
+                command: 'synesis.openLocation',
+                title: 'Open Location',
+                arguments: [topic.file, topic.line || 0, 0]
+            };
+        }
     }
 }
 
-class ValueTreeItem extends vscode.TreeItem {
-    constructor(fieldName, topicValue, occurrences, sortKey) {
-        super(topicValue, vscode.TreeItemCollapsibleState.Collapsed);
-
-        this.fieldName = fieldName;
-        this.topicValue = topicValue;
-        this.occurrences = occurrences;
-        this.sortKey = typeof sortKey === 'number' ? sortKey : null;
-        this.description = `${occurrences.length} concept(s)`;
-        this.iconPath = new vscode.ThemeIcon('graph');
-        this.contextValue = 'ontologyTopicValue';
-    }
-}
-
-class OccurrenceTreeItem extends vscode.TreeItem {
-    constructor(occurrence) {
-        super(occurrence.concept, vscode.TreeItemCollapsibleState.None);
-
-        this.iconPath = new vscode.ThemeIcon('symbol-constant');
-        this.contextValue = 'ontologyTopicOccurrence';
-        this.command = {
-            command: 'synesis.openLocation',
-            title: 'Open Location',
-            arguments: [occurrence.file, occurrence.line, occurrence.column]
-        };
+class StatusTreeItem extends vscode.TreeItem {
+    constructor(label, description) {
+        super(label, vscode.TreeItemCollapsibleState.None);
+        this.description = description || '';
+        this.tooltip = description || '';
+        this.iconPath = new vscode.ThemeIcon('sync');
+        this.contextValue = 'status';
+        this.isPlaceholder = true;
     }
 }
 

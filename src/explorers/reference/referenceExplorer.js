@@ -11,7 +11,7 @@
  *     - getChildren: Hierarquia (refs -> ocorrências)
  *
  * Dependências críticas:
- *     - DataService: Adapter LSP/local para dados normalizados
+ *     - DataService: LSP-only data access
  *
  * Exemplo de uso:
  *     const explorer = new ReferenceExplorer(dataService);
@@ -27,6 +27,7 @@ class ReferenceExplorer {
         this.dataService = dataService;
         this.references = new Map(); // bibref -> [occurrences]
         this.filterText = '';
+        this.placeholder = null;
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -37,6 +38,18 @@ class ReferenceExplorer {
      */
     async refresh() {
         this.references.clear();
+        this.placeholder = null;
+
+        const lspStatus = this._getLspStatus();
+        if (lspStatus !== 'ready') {
+            const label = lspStatus === 'disabled' ? 'LSP disabled' : 'LSP not ready';
+            const description = lspStatus === 'disabled'
+                ? 'Synesis LSP is disabled in settings.'
+                : 'Waiting for Synesis LSP to initialize...';
+            this._setPlaceholder(label, description);
+            this._onDidChangeTreeData.fire();
+            return;
+        }
 
         try {
             const refs = await this.dataService.getReferences();
@@ -68,6 +81,10 @@ class ReferenceExplorer {
      */
     async getChildren(element) {
         if (!element) {
+            if (this.placeholder) {
+                return [this.placeholder];
+            }
+
             // Root level: lista de referências
             const items = [];
             const filter = this.filterText;
@@ -81,10 +98,29 @@ class ReferenceExplorer {
             }
 
             return items.sort((a, b) => a.bibref.localeCompare(b.bibref));
-        } else {
-            // Child level: lista de ocorrências
-            return element.occurrences.map(occ => new OccurrenceTreeItem(occ));
         }
+
+        if (element.isPlaceholder) {
+            return [];
+        }
+
+        // Child level: lista de ocorrências
+        return element.occurrences.map(occ => new OccurrenceTreeItem(occ));
+    }
+
+    _getLspStatus() {
+        const client = this.dataService && this.dataService.lspClient;
+        if (!client) {
+            return 'disabled';
+        }
+        if (typeof client.isReady !== 'function' || !client.isReady()) {
+            return 'loading';
+        }
+        return 'ready';
+    }
+
+    _setPlaceholder(label, description) {
+        this.placeholder = new StatusTreeItem(label, description);
     }
 
     /**
@@ -93,6 +129,7 @@ class ReferenceExplorer {
      */
     setFilter(text) {
         this.filterText = (text || '').trim().toLowerCase();
+        this._setFilterActive(this.filterText.length > 0);
         this._onDidChangeTreeData.fire();
     }
 
@@ -102,6 +139,10 @@ class ReferenceExplorer {
      */
     getFilter() {
         return this.filterText;
+    }
+
+    async _setFilterActive(value) {
+        await vscode.commands.executeCommand('setContext', 'synesis.reference.filterActive', value);
     }
 }
 
@@ -127,7 +168,10 @@ class ReferenceTreeItem extends vscode.TreeItem {
 class OccurrenceTreeItem extends vscode.TreeItem {
     constructor(occurrence) {
         const fileName = path.basename(occurrence.file);
-        const label = `${fileName}:${occurrence.line}`;
+        const lineLabel = typeof occurrence.line === 'number' && occurrence.line >= 0
+            ? occurrence.line + 1
+            : '?';
+        const label = `${fileName}:${lineLabel}`;
 
         super(label, vscode.TreeItemCollapsibleState.None);
 
@@ -142,6 +186,17 @@ class OccurrenceTreeItem extends vscode.TreeItem {
             title: 'Open Location',
             arguments: [occurrence.file, occurrence.line]
         };
+    }
+}
+
+class StatusTreeItem extends vscode.TreeItem {
+    constructor(label, description) {
+        super(label, vscode.TreeItemCollapsibleState.None);
+        this.description = description || '';
+        this.tooltip = description || '';
+        this.iconPath = new vscode.ThemeIcon('sync');
+        this.contextValue = 'status';
+        this.isPlaceholder = true;
     }
 }
 

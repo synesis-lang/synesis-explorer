@@ -1,6 +1,6 @@
 # Synesis Explorer
 
-[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.5.0-blue.svg)](CHANGELOG.md)
 [![VSCode](https://img.shields.io/badge/VSCode-%3E%3D1.60.0-blue.svg)](https://code.visualstudio.com/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
@@ -28,7 +28,12 @@ Full Language Server Protocol support for enhanced editing and navigation.
 - **Rename Symbol**: `F2` to rename codes or references across all files
 - **Inlay Hints**: Author and year displayed inline after `@bibref`
 - **Document Symbols**: Outline view with SOURCE/ITEM/ONTOLOGY hierarchy
-- Automatic fallback to local regex parsing when LSP is unavailable
+- **LSP-Only Operation**: All data retrieval via LSP (regex fallback removed)
+- **Explorer Status**: Tree views show "LSP not ready" while the server initializes and "LSP disabled" when LSP is turned off
+- **No Regex Fallback**: Local regex parsing has been removed; the LSP is required for data features
+
+> **⚠️ Important**: Version 0.5.0+ requires Synesis LSP v0.13.0+ to be installed and running.
+> If you experience issues, see the [LSP Troubleshooting Guide](LSP_TROUBLESHOOTING.md) for diagnostics and solutions.
 
 ### Reference Explorer
 
@@ -227,6 +232,18 @@ If you need to launch the LSP as a Python module, pass args explicitly:
 }
 ```
 
+**LSP Required**
+
+Reference/Code/Relation explorers depend on LSP responses.
+If the server is still initializing, the tree views show a placeholder until LSP is ready.
+If LSP is disabled, explorers show an "LSP disabled" placeholder.
+
+**Troubleshooting**: If LSP features are not working, check the [LSP Troubleshooting Guide](LSP_TROUBLESHOOTING.md) for:
+- LSP status diagnostics
+- Common problems and solutions
+- Capability validation
+- Version requirements
+
 ### Activating File Icons
 
 1. Open VSCode Settings
@@ -253,7 +270,7 @@ Synesis-Explorer/
 │   ├── lsp/               # LSP client
 │   │   └── synesisClient.js
 │   ├── services/          # Data services
-│   │   └── dataService.js # Adapter: LSP vs local regex
+│   │   └── dataService.js # Adapter: LSP-only data access
 │   ├── parsers/           # File parsers
 │   │   ├── synesisParser.js
 │   │   ├── ontologyParser.js

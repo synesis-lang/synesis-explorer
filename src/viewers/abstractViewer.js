@@ -159,26 +159,33 @@ class AbstractViewer {
             const filtered = items.filter(item => item.bibref === bibref);
 
             for (const item of filtered) {
-                const noteText = showNote ? collectFieldValues(item.fields, memoFields).join(' | ') : '';
-                const chainText = showChain ? collectFieldValues(item.fields, chainFields).join(' | ') : '';
+                // Coletar notes, chains e codes como arrays (não concatenar)
+                const noteValues = showNote ? collectFieldValues(item.fields, memoFields) : [];
+                const chainValues = showChain ? collectFieldValues(item.fields, chainFields) : [];
                 const codes = showCodes ? extractCodesFromFields(item.fields, codeFields) : [];
 
                 if (excerptFields.length === 0) {
-                    if (!noteText && !chainText && codes.length === 0) {
+                    // Se não há excerpt fields, criar excerpts para cada par (note, chain)
+                    const maxPairs = Math.max(noteValues.length, chainValues.length, codes.length > 0 ? 1 : 0);
+
+                    if (maxPairs === 0) {
                         continue;
                     }
 
-                    excerpts.push({
-                        text: '',
-                        note: noteText,
-                        chain: chainText,
-                        codes,
-                        line: item.line,
-                        file: filePath
-                    });
+                    for (let i = 0; i < maxPairs; i++) {
+                        excerpts.push({
+                            text: '',
+                            note: noteValues[i] || '',
+                            chain: chainValues[i] || '',
+                            codes: i === 0 ? codes : [],
+                            line: item.line,
+                            file: filePath
+                        });
+                    }
                     continue;
                 }
 
+                // Se há excerpt fields (ex: text), criar múltiplos excerpts se houver múltiplos notes/chains
                 for (const fieldName of excerptFields) {
                     if (!item.fields[fieldName]) {
                         continue;
@@ -189,14 +196,31 @@ class AbstractViewer {
                         continue;
                     }
 
-                    excerpts.push({
-                        text: excerptText,
-                        note: noteText,
-                        chain: chainText,
-                        codes,
-                        line: item.line,
-                        file: filePath
-                    });
+                    // Se há apenas 1 note e 1 chain (ou nenhum), criar 1 excerpt (comportamento original)
+                    if (noteValues.length <= 1 && chainValues.length <= 1) {
+                        excerpts.push({
+                            text: excerptText,
+                            note: noteValues[0] || '',
+                            chain: chainValues[0] || '',
+                            codes,
+                            line: item.line,
+                            file: filePath
+                        });
+                    } else {
+                        // Se há múltiplos notes/chains, criar um excerpt para cada par
+                        const maxPairs = Math.max(noteValues.length, chainValues.length);
+
+                        for (let i = 0; i < maxPairs; i++) {
+                            excerpts.push({
+                                text: excerptText,
+                                note: noteValues[i] || '',
+                                chain: chainValues[i] || '',
+                                codes: i === 0 ? codes : [],
+                                line: item.line,
+                                file: filePath
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -635,11 +659,29 @@ function isRelationToken(token) {
 }
 
 function collectFieldValues(fields, names) {
-    return names
-        .map(name => fields[name])
-        .filter(Boolean)
-        .map(value => normalizeExcerpt(value))
-        .filter(Boolean);
+    const values = [];
+    for (const name of names) {
+        const fieldValue = fields[name];
+        if (!fieldValue) {
+            continue;
+        }
+
+        // Suporta campos com múltiplos valores (arrays)
+        if (Array.isArray(fieldValue)) {
+            for (const val of fieldValue) {
+                const normalized = normalizeExcerpt(val);
+                if (normalized) {
+                    values.push(normalized);
+                }
+            }
+        } else {
+            const normalized = normalizeExcerpt(fieldValue);
+            if (normalized) {
+                values.push(normalized);
+            }
+        }
+    }
+    return values;
 }
 
 function extractCodesFromFields(fields, names) {
