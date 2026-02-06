@@ -21,9 +21,23 @@ class RelationExplorer {
         this.relations = new Map(); // relation -> [triplets]
         this.filterText = '';
         this.placeholder = null;
+        this._lastDataHash = null; // Cache hash to avoid unnecessary refreshes
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    /**
+     * Simple hash function for cache comparison
+     */
+    _hashData(relations) {
+        if (!relations || relations.length === 0) {
+            return 'empty';
+        }
+        const count = relations.length;
+        const first = relations[0]?.relation || '';
+        const tripletCount = relations.reduce((sum, r) => sum + (r.triplets?.length || 0), 0);
+        return `${count}:${first}:${tripletCount}`;
     }
 
     /**
@@ -47,20 +61,16 @@ class RelationExplorer {
 
         try {
             const relations = await this.dataService.getRelations();
-            console.log('RelationExplorer.refresh: received', relations ? relations.length : 0, 'relation types');
 
-            if (relations && relations.length > 0) {
-                const firstRelation = relations[0];
-                console.log('RelationExplorer.refresh: First relation:', firstRelation.relation);
-                console.log('RelationExplorer.refresh: First relation triplets:', firstRelation.triplets.length);
-                if (firstRelation.triplets.length > 0) {
-                    const firstTriplet = firstRelation.triplets[0];
-                    console.log('RelationExplorer.refresh: First triplet file:', firstTriplet.file);
-                    console.log('RelationExplorer.refresh: First triplet line:', firstTriplet.line);
-                    console.log('RelationExplorer.refresh: First triplet:', `${firstTriplet.from} -> ${firstTriplet.to}`);
-                }
+            // Check if data actually changed
+            const newHash = this._hashData(relations);
+            if (newHash === this._lastDataHash) {
+                // Data hasn't changed, skip update
+                return;
             }
+            this._lastDataHash = newHash;
 
+            this.relations.clear();
             for (const entry of relations) {
                 this.relations.set(entry.relation, entry.triplets);
             }
@@ -68,7 +78,7 @@ class RelationExplorer {
             await this._setHasChains(this.relations.size > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error scanning relations:', error);
+            console.error('RelationExplorer: Error scanning relations:', error);
             await this._setHasChains(false);
             vscode.window.showErrorMessage(`Failed to scan relations: ${error.message}`);
         }

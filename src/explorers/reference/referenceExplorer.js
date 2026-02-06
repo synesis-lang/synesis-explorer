@@ -28,9 +28,23 @@ class ReferenceExplorer {
         this.references = new Map(); // bibref -> [occurrences]
         this.filterText = '';
         this.placeholder = null;
+        this._lastDataHash = null; // Cache hash to avoid unnecessary refreshes
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    /**
+     * Simple hash function for cache comparison
+     */
+    _hashData(refs) {
+        if (!refs || refs.length === 0) {
+            return 'empty';
+        }
+        const count = refs.length;
+        const first = refs[0]?.bibref || '';
+        const occCount = refs.reduce((sum, r) => sum + (r.occurrences?.length || 0), 0);
+        return `${count}:${first}:${occCount}`;
     }
 
     /**
@@ -54,13 +68,22 @@ class ReferenceExplorer {
         try {
             const refs = await this.dataService.getReferences();
 
+            // Check if data actually changed
+            const newHash = this._hashData(refs);
+            if (newHash === this._lastDataHash) {
+                // Data hasn't changed, skip update
+                return;
+            }
+            this._lastDataHash = newHash;
+
+            this.references.clear();
             for (const ref of refs) {
                 this.references.set(ref.bibref, ref.occurrences);
             }
 
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error scanning workspace:', error);
+            console.error('ReferenceExplorer: Error scanning workspace:', error);
             vscode.window.showErrorMessage(`Failed to scan workspace: ${error.message}`);
         }
     }

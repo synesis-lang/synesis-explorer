@@ -18,9 +18,24 @@ class OntologyAnnotationExplorer {
         this.annotations = new Map(); // code -> { ontologyDefined, ontologyFile, ontologyLine, occurrences }
         this.filterText = '';
         this.placeholder = null;
+        this._lastDataHash = null; // Cache hash to avoid unnecessary refreshes
+        this._lastActiveFile = null; // Track active file changes
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    /**
+     * Simple hash function for cache comparison
+     */
+    _hashData(annotations, activeFile) {
+        if (!annotations || annotations.length === 0) {
+            return `empty:${activeFile}`;
+        }
+        const count = annotations.length;
+        const first = annotations[0]?.code || '';
+        const occCount = annotations.reduce((sum, a) => sum + (a.occurrences?.length || 0), 0);
+        return `${activeFile}:${count}:${first}:${occCount}`;
     }
 
     /**
@@ -55,6 +70,16 @@ class OntologyAnnotationExplorer {
             const annotations = await this.dataService.getOntologyAnnotations(activeFile);
             const entries = Array.isArray(annotations) ? annotations : [];
 
+            // Check if data actually changed
+            const newHash = this._hashData(entries, activeFile);
+            if (newHash === this._lastDataHash && activeFile === this._lastActiveFile) {
+                // Data hasn't changed, skip update
+                return;
+            }
+            this._lastDataHash = newHash;
+            this._lastActiveFile = activeFile;
+
+            this.annotations.clear();
             for (const entry of entries) {
                 this.annotations.set(entry.code, entry);
             }
@@ -62,7 +87,7 @@ class OntologyAnnotationExplorer {
             await this._setHasOntologyAnnotations(this.annotations.size > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error loading ontology annotations from LSP:', error);
+            console.error('OntologyAnnotationExplorer: Error loading annotations:', error);
             await this._setHasOntologyAnnotations(false);
             vscode.window.showErrorMessage(`Failed to load ontology annotations: ${error.message}`);
         }

@@ -104,9 +104,6 @@ function activate(context) {
     vscode.commands.executeCommand('setContext', 'synesis.ontology.annotation.filterActive', false);
     vscode.commands.executeCommand('setContext', 'synesis.relation.filterActive', false);
 
-    const editorConfig = vscode.workspace.getConfiguration('editor');
-    editorConfig.update('wordWrap', 'on', vscode.ConfigurationTarget.Workspace);
-
     // LSP setup
     const lspConfig = vscode.workspace.getConfiguration('synesisExplorer');
     const lspEnabled = lspConfig.get('lsp.enabled', true);
@@ -176,6 +173,13 @@ function activate(context) {
         relationExplorer.refresh();
         ontologyExplorer.refresh();
         ontologyAnnotationExplorer.refresh();
+    };
+
+    // Debounced refresh for file watchers to avoid cascade
+    let refreshDebounceTimer;
+    const debouncedRefresh = (refreshFn, delay = 300) => {
+        clearTimeout(refreshDebounceTimer);
+        refreshDebounceTimer = setTimeout(refreshFn, delay);
     };
 
     const runLspLoadProject = async ({ showProgress, showErrorMessage, workspaceRoot }) => {
@@ -468,6 +472,10 @@ function activate(context) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.code.goToDefinition', async (treeItem) => {
+            // Fallback: keybinding (F12) não passa treeItem, usar seleção do tree view
+            if (!treeItem && codeTreeView && codeTreeView.selection.length > 0) {
+                treeItem = codeTreeView.selection[0];
+            }
             if (!treeItem || !treeItem.code) {
                 return;
             }
@@ -506,98 +514,42 @@ function activate(context) {
 
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.code.rename', async (treeItem) => {
-            await renameSymbol(treeItem, 'code', 'Enter new code name');
+            if (!treeItem && codeTreeView && codeTreeView.selection.length > 0) {
+                treeItem = codeTreeView.selection[0];
+            }
+            const oldName = treeItem ? treeItem.code : '';
+            const renamed = await renameSymbol(treeItem, 'code', 'Enter new code name');
+            if (renamed) {
+                await runLspLoadProject({ showProgress: false, showErrorMessage: false });
+                vscode.window.showInformationMessage(`Renamed code "${oldName}".`);
+            }
         })
     );
 
     context.subscriptions.push(
         vscode.commands.registerCommand('synesis.reference.rename', async (treeItem) => {
-            await renameSymbol(treeItem, 'bibref', 'Enter new reference name (with @)');
+            if (!treeItem && referenceTreeView && referenceTreeView.selection.length > 0) {
+                treeItem = referenceTreeView.selection[0];
+            }
+            const oldName = treeItem ? treeItem.bibref : '';
+            const renamed = await renameSymbol(treeItem, 'bibref', 'Enter new reference name (with @)');
+            if (renamed) {
+                await runLspLoadProject({ showProgress: false, showErrorMessage: false });
+                vscode.window.showInformationMessage(`Renamed reference "${oldName}".`);
+            }
         })
     );
 
-    // File watchers
-    const synWatcher = vscode.workspace.createFileSystemWatcher('**/*.syn');
-    synWatcher.onDidChange(() => {
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    synWatcher.onDidCreate(() => {
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    synWatcher.onDidDelete(() => {
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    context.subscriptions.push(synWatcher);
-
-    const synoWatcher = vscode.workspace.createFileSystemWatcher('**/*.syno');
-    synoWatcher.onDidChange(() => {
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    synoWatcher.onDidCreate(() => {
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    synoWatcher.onDidDelete(() => {
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    context.subscriptions.push(synoWatcher);
-
-    const projectWatcher = vscode.workspace.createFileSystemWatcher('**/*.synp');
-    projectWatcher.onDidChange(() => {
-        templateManager.invalidateCache();
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    projectWatcher.onDidCreate(() => {
-        templateManager.invalidateCache();
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    projectWatcher.onDidDelete(() => {
-        templateManager.invalidateCache();
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    context.subscriptions.push(projectWatcher);
-
-    const templateWatcher = vscode.workspace.createFileSystemWatcher('**/*.synt');
-    templateWatcher.onDidChange(() => {
-        templateManager.invalidateCache();
-        referenceExplorer.refresh();
-        codeExplorer.refresh();
-        relationExplorer.refresh();
-        ontologyExplorer.refresh();
-        ontologyAnnotationExplorer.refresh();
-    });
-    context.subscriptions.push(templateWatcher);
-
+    // Active editor change - only refresh ontology annotations (context-specific)
     context.subscriptions.push(
         vscode.window.onDidChangeActiveTextEditor(editor => {
             updateActiveFileKind(editor);
-            ontologyAnnotationExplorer.refresh();
+            // Only refresh ontology annotations as it's file-specific
+            debouncedRefresh(() => ontologyAnnotationExplorer.refresh(), 200);
         })
     );
 
+    // File save handler - triggers LSP reload which will refresh all explorers
     context.subscriptions.push(
         vscode.workspace.onDidSaveTextDocument(document => {
             const ext = path.extname(document.uri.fsPath || '').toLowerCase();
@@ -649,7 +601,21 @@ async function findSymbolPosition(treeItem) {
             continue;
         }
         const uri = vscode.Uri.file(occ.file);
-        return { uri, position: new vscode.Position(occ.line, occ.column || 0) };
+        try {
+            const doc = await vscode.workspace.openTextDocument(uri);
+            const lineIndex = typeof occ.line === 'number' ? occ.line : 0;
+            if (lineIndex < 0 || lineIndex >= doc.lineCount) {
+                continue;
+            }
+            const lineText = doc.lineAt(lineIndex).text;
+            const preferredColumn = typeof occ.column === 'number' ? occ.column : 0;
+            const resolvedColumn = findSymbolInLine(lineText, symbol, preferredColumn);
+            if (resolvedColumn !== null) {
+                return { uri, position: new vscode.Position(lineIndex, resolvedColumn) };
+            }
+        } catch (error) {
+            console.warn('findSymbolPosition: failed to open document', occ.file, error.message);
+        }
     }
 
     const files = await vscode.workspace.findFiles('**/*.syn', null, 50);
@@ -664,6 +630,36 @@ async function findSymbolPosition(treeItem) {
             const pos = doc.positionAt(idx);
             return { uri: fileUri, position: pos };
         }
+    }
+
+    return null;
+}
+
+function findSymbolInLine(lineText, symbol, preferredColumn = 0) {
+    if (!lineText || !symbol) {
+        return null;
+    }
+
+    const exactAt = lineText.indexOf(symbol, Math.max(0, preferredColumn));
+    if (exactAt >= 0) {
+        return exactAt;
+    }
+
+    const exact = lineText.indexOf(symbol);
+    if (exact >= 0) {
+        return exact;
+    }
+
+    const lowerLine = lineText.toLowerCase();
+    const lowerSymbol = symbol.toLowerCase();
+    const ciAt = lowerLine.indexOf(lowerSymbol, Math.max(0, preferredColumn));
+    if (ciAt >= 0) {
+        return ciAt;
+    }
+
+    const ci = lowerLine.indexOf(lowerSymbol);
+    if (ci >= 0) {
+        return ci;
     }
 
     return null;
@@ -701,11 +697,12 @@ async function findOntologyDefinition(code) {
 
 /**
  * Renames a symbol (code or bibref) using the LSP rename provider.
+ * Returns true if rename was successful, false otherwise.
  */
 async function renameSymbol(treeItem, symbolKey, promptMessage) {
     const symbol = treeItem ? treeItem[symbolKey] : null;
     if (!symbol) {
-        return;
+        return false;
     }
 
     const newName = await vscode.window.showInputBox({
@@ -723,13 +720,13 @@ async function renameSymbol(treeItem, symbolKey, promptMessage) {
     });
 
     if (!newName) {
-        return;
+        return false;
     }
 
     const position = await findSymbolPosition(treeItem);
     if (!position) {
         vscode.window.showWarningMessage('Could not find symbol position for rename.');
-        return;
+        return false;
     }
 
     try {
@@ -742,12 +739,15 @@ async function renameSymbol(treeItem, symbolKey, promptMessage) {
 
         if (edit && edit.size > 0) {
             await vscode.workspace.applyEdit(edit);
-            vscode.window.showInformationMessage(`Renamed "${symbol}" to "${newName.trim()}".`);
+            await vscode.workspace.saveAll(false);
+            return true;
         } else {
             vscode.window.showWarningMessage('Rename failed. LSP may not be available.');
+            return false;
         }
     } catch (error) {
         vscode.window.showErrorMessage(`Rename failed: ${error.message}`);
+        return false;
     }
 }
 

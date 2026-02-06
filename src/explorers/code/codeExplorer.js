@@ -22,9 +22,25 @@ class CodeExplorer {
         this.codes = new Map(); // code -> { usageCount, ontologyDefined, occurrences }
         this.filterText = '';
         this.placeholder = null;
+        this._lastDataHash = null; // Cache hash to avoid unnecessary refreshes
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    /**
+     * Simple hash function for cache comparison
+     */
+    _hashData(codes) {
+        if (!codes || codes.length === 0) {
+            return 'empty';
+        }
+        // Create a simple hash based on codes count and first/last code names
+        const count = codes.length;
+        const first = codes[0]?.code || '';
+        const last = codes[codes.length - 1]?.code || '';
+        const occCount = codes.reduce((sum, c) => sum + (c.occurrences?.length || 0), 0);
+        return `${count}:${first}:${last}:${occCount}`;
     }
 
     /**
@@ -48,20 +64,16 @@ class CodeExplorer {
 
         try {
             const codes = await this.dataService.getCodes();
-            console.log('CodeExplorer.refresh: received', codes ? codes.length : 0, 'codes');
 
-            if (codes && codes.length > 0) {
-                const firstCode = codes[0];
-                console.log('CodeExplorer.refresh: First code:', firstCode.code);
-                console.log('CodeExplorer.refresh: First code occurrences:', firstCode.occurrences.length);
-                if (firstCode.occurrences.length > 0) {
-                    const firstOcc = firstCode.occurrences[0];
-                    console.log('CodeExplorer.refresh: First occurrence file:', firstOcc.file);
-                    console.log('CodeExplorer.refresh: First occurrence line:', firstOcc.line);
-                    console.log('CodeExplorer.refresh: First occurrence column:', firstOcc.column);
-                }
+            // Check if data actually changed
+            const newHash = this._hashData(codes);
+            if (newHash === this._lastDataHash) {
+                // Data hasn't changed, skip update
+                return;
             }
+            this._lastDataHash = newHash;
 
+            this.codes.clear();
             for (const entry of codes) {
                 this.codes.set(entry.code, {
                     usageCount: entry.usageCount,
@@ -73,7 +85,7 @@ class CodeExplorer {
             await this._setHasCodes(this.codes.size > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error scanning codes:', error);
+            console.error('CodeExplorer: Error scanning codes:', error);
             await this._setHasCodes(false);
             vscode.window.showErrorMessage(`Failed to scan codes: ${error.message}`);
         }
@@ -162,7 +174,8 @@ class CodeTreeItem extends vscode.TreeItem {
 
         this.code = code;
         this.occurrences = data.occurrences;
-        this.description = `${data.usageCount} occurrence(s)`;
+        const occurrenceCount = Array.isArray(data.occurrences) ? data.occurrences.length : 0;
+        this.description = `${occurrenceCount} occurrence(s)`;
         this.iconPath = new vscode.ThemeIcon(data.ontologyDefined ? 'symbol-key' : 'symbol-variable');
         this.contextValue = 'code';
     }
@@ -170,11 +183,6 @@ class CodeTreeItem extends vscode.TreeItem {
 
 class OccurrenceTreeItem extends vscode.TreeItem {
     constructor(occurrence) {
-        // Validar se file existe
-        if (!occurrence.file) {
-            console.warn('OccurrenceTreeItem: occurrence.file is null or undefined', occurrence);
-        }
-
         const fileName = occurrence.file ? path.basename(occurrence.file) : '<unknown file>';
         const lineLabel = typeof occurrence.line === 'number' && occurrence.line >= 0
             ? occurrence.line + 1

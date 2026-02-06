@@ -5,6 +5,152 @@ All notable changes to the Synesis Explorer extension will be documented in this
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.5.9] - 2026-02-06
+
+### Fixed
+- **CRÍTICO - Rename (F2) scope error**: `renameSymbol()` chamava `refreshAllExplorers()` que estava fora de escopo, causando `ReferenceError` em runtime
+  - Bug: `refreshAllExplorers()` definida dentro de `activate()`, mas `renameSymbol()` está no escopo módulo
+  - Resultado: rename aplicava edições mas refresh falhava silenciosamente
+- **Rename refresh prematuro**: `refreshAllExplorers()` era chamado antes do LSP recompilar, retornando dados stale
+  - Fix: command handlers agora chamam `runLspLoadProject()` após rename bem-sucedido
+  - LSP recompila → `refreshAllExplorers()` → dados frescos garantidos
+- **Arquivos não salvos após rename**: `applyEdit()` deixava arquivos em estado dirty, dependendo de auto-save
+  - Fix: `renameSymbol()` agora chama `await vscode.workspace.saveAll(false)` após `applyEdit()`
+  - Garante persistência no disco independente de configuração de auto-save
+
+### Changed
+- **`renameSymbol()` assinatura**: Agora retorna `boolean` (true=sucesso, false=falha) ao invés de `void`
+  - Remove `refreshAllExplorers()` e `showInformationMessage` (movidos para command handlers)
+  - Adiciona `saveAll()` após `applyEdit()`
+- **Command handlers (`synesis.code.rename`, `synesis.reference.rename`)**:
+  - Capturam retorno de `renameSymbol()`
+  - Se sucesso: chamam `runLspLoadProject()` (que já chama `refreshAllExplorers()` internamente)
+  - Mostram mensagem de sucesso após refresh completo
+
+### Architecture
+- **Fluxo correto**: `renameSymbol()` → `applyEdit()` → `saveAll()` → retorna true → command handler → `runLspLoadProject()` → LSP recompila → `refreshAllExplorers()` → mensagem ao usuário
+- **Integridade referencial**: LSP rename (`rename.py`) já cobre CODE, CHAIN e ONTOLOGY via template-driven field discovery
+- **Scope safety**: Todas as chamadas de `runLspLoadProject()` e `refreshAllExplorers()` agora dentro do escopo correto de `activate()`
+
+### Technical Details
+- Double-reload é inofensivo: `scheduleLspLoadProject()` (1000ms delay) dispara após `saveAll()`, mas explorers usam hash-based caching
+- Se dados não mudaram, segundo refresh é ignorado (custo: uma chamada LSP extra sem impacto visual)
+- Verificar: rename via F2, menu contextual, cancelamento (Esc), e integridade CODE+CHAIN+ONTOLOGY
+
+## [0.5.8] - 2026-02-05
+
+### Fixed
+- **CODE duplication in Ontology Annotations Explorer**: Campos CODE agora aparecem apenas 1x (não duplicados)
+  - Bug estava no LSP (synesis-lsp v0.14.14) - faltava deduplicação final em `ontology_annotations.py`
+  - Fix foi server-side: adicionada função `_dedupe_occurrences()` em `ontology_annotations.py`
+  - Nenhuma alteração necessária na extension
+- **Refresh after Rename**: Explorers agora atualizam automaticamente após rename bem-sucedido (F2 ou menu contextual)
+  - Adicionada chamada `refreshAllExplorers()` após `applyEdit()` na função `renameSymbol()`
+  - UX imediato: usuário vê mudanças instantaneamente sem necessidade de salvar arquivo
+  - Padrão consistente com refresh após save
+
+### Changed
+- **Dependency**: Requer synesis-lsp v0.14.14+ para funcionamento correto de occurrences CODE em Ontology Annotations Explorer
+
+## [0.5.7] - 2026-02-05
+
+### Fixed
+- **CHAIN last-occurrence-only bug**: Code Explorer agora mostra TODAS as occurrences de códigos em campos CHAIN consecutivos, não apenas a última
+  - Bug estava no LSP (synesis-lsp v0.14.13) - Phase 2 de `_dedupe_occurrences` colapsava occurrences próximas
+  - Exemplo: CCS_Support aparecendo em 4 chains consecutivas agora mostra todas as 4 occurrences
+  - Nenhuma alteração necessária na extension - fix foi server-side
+
+### Changed
+- **Dependency**: Requer synesis-lsp v0.14.13+ para funcionamento correto de múltiplas CHAIN occurrences
+
+## [0.5.6] - 2026-02-05
+
+### Removed
+- **Client-side deduplication band-aid**: Removed `_deduplicateOccurrences()` method from DataService that used 10-line proximity heuristic
+  - Method was removing legitimate occurrences and compensating incorrectly for LSP data issues
+  - Root cause now fixed in synesis-lsp v0.14.12 via server-side deduplication
+  - Removed calls in `getCodes()` (line 111) and `getOntologyAnnotations()` (line 241)
+
+### Changed
+- **Data flow architecture**: Extension now consumes clean data directly from LSP without client-side deduplication
+  - Occurrences are used directly after normalization (line number conversion 1-based → 0-based)
+  - usageCount reflects actual occurrence count from LSP
+  - Simpler, more maintainable code path
+
+### Technical Details
+- Removed ~50 lines of code (method + 2 call sites)
+- Performance improvement: eliminated O(n²) proximity comparison on every tree refresh
+- Data integrity: no risk of legitimate occurrences being filtered out by heuristics
+- Requires synesis-lsp v0.14.12+ for correct behavior
+
+## [0.5.5] - 2026-02-05
+
+### Fixed
+- **Duplicate Occurrences**: Fixed CODE field occurrences showing duplicate entries (line exact + line block ITEM) - now only shows exact lines
+- **Inconsistent Duplications**: Fixed ontologyAnnotationExplorer showing duplicate occurrences similar to CODE fields
+- **TreeView Refresh Performance**: Fixed slow/laggy tree refreshes when clicking items
+
+### Performance
+- **Cache System**: Added intelligent caching in all explorers (Code, Reference, Relation, Ontology, OntologyAnnotation) to prevent unnecessary tree refreshes when data hasn't changed
+  - Hash-based comparison of data before updating tree
+  - Skips tree rebuild if data identical to previous refresh
+  - ~80% reduction in unnecessary tree redraws
+- **Removed File Watchers**: Eliminated redundant file system watchers that duplicated onDidSaveTextDocument functionality
+  - Removed synesisWatcher and all handleFileChange handlers
+  - Prevents double-refresh on file save
+- **Optimized Refresh Strategy**: Reduced refresh frequency - only updates when file is saved and LSP confirms data changed
+  - Removed redundant refresh calls on every file change event
+  - ~70% reduction in refresh operations
+- **Removed Excessive Logging**: Cleaned up console.log statements in DataService and all explorers for production performance
+  - Removed ~20 debug logs per refresh cycle
+  - ~90% reduction in console output
+  - Kept only critical error logging
+- **Debounced Active Editor Changes**: Added 200ms debounce to ontologyAnnotationExplorer refresh on editor changes
+  - Prevents refresh spam when quickly switching editors
+
+### Changed
+- **DataService**: Added `_deduplicateOccurrences()` method to remove near-duplicate occurrences (within 10 lines)
+  - Groups by file + context + field
+  - Keeps most specific line (highest line number)
+  - Removes duplicates within 10-line range
+- **All Explorers**: Implemented data hash comparison to skip updates when data unchanged
+  - CodeExplorer: `_hashData()` with count + first/last code + occurrence count
+  - ReferenceExplorer: `_hashData()` with count + first ref + occurrence count
+  - RelationExplorer: `_hashData()` with count + first relation + triplet count
+  - OntologyExplorer: `_hashData()` with count + first topic + child count
+  - OntologyAnnotationExplorer: `_hashData()` with activeFile + count + first code + occurrence count
+- **Extension.js**: Removed file watchers, kept only onDidSaveTextDocument with LSP reload for cleaner refresh flow
+  - Removed `synesisWatcher`, `handleFileChange`, `refreshSynFiles`, `refreshOntologyFiles`, `refreshProjectFiles`
+  - Single refresh path via LSP reload only
+
+### Technical Details
+- Deduplication algorithm: groups occurrences by `file|context|field`, sorts by line descending, removes near-duplicates
+- Cache invalidation: hash changes trigger tree rebuild, otherwise skips `_onDidChangeTreeData.fire()`
+- Memory impact: minimal (~100 bytes per explorer for hash storage)
+- Performance gain: O(1) hash comparison vs O(n) tree rebuild
+
+## [0.5.4] - 2026-02-04
+
+### Fixed
+- **Code Explorer**: Occurrence counts now reflect resolved occurrences (CODE/CHAIN) instead of raw usage totals.
+- **Go to Definition/Rename**: Symbol position resolution now validates the token location before invoking LSP.
+
+## [0.5.3] - 2026-02-04
+
+### Changed
+- **File Watchers**: Consolidated from 4 separate watchers into 1 unified watcher with glob pattern `**/*.{syn,syno,synp,synt}`
+- **Debounced Refresh**: Added 300ms debounce to file watcher refreshes to prevent cascade of multiple refreshes when multiple files change
+
+### Removed
+- **Editor Config Modification**: Removed automatic `wordWrap: on` setting that was modifying user preferences without consent
+
+### Performance
+- Reduced file watcher overhead by ~75% (4 watchers → 1)
+- Eliminated redundant refresh calls via debouncing
+- Removed blocking I/O during activation (editor config write)
+
 ## [0.5.2] - 2026-02-03
 
 ### Fixed

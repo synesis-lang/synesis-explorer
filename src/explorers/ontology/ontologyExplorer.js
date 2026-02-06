@@ -18,9 +18,23 @@ class OntologyExplorer {
         this.topics = [];
         this.filterText = '';
         this.placeholder = null;
+        this._lastDataHash = null; // Cache hash to avoid unnecessary refreshes
 
         this._onDidChangeTreeData = new vscode.EventEmitter();
         this.onDidChangeTreeData = this._onDidChangeTreeData.event;
+    }
+
+    /**
+     * Simple hash function for cache comparison
+     */
+    _hashData(topics) {
+        if (!topics || topics.length === 0) {
+            return 'empty';
+        }
+        const count = topics.length;
+        const first = topics[0]?.name || '';
+        const childCount = topics.reduce((sum, t) => sum + (t.children?.length || 0), 0);
+        return `${count}:${first}:${childCount}`;
     }
 
     /**
@@ -44,11 +58,21 @@ class OntologyExplorer {
 
         try {
             const topics = await this.dataService.getOntologyTopics();
-            this.topics = Array.isArray(topics) ? topics : [];
+            const topicsArray = Array.isArray(topics) ? topics : [];
+
+            // Check if data actually changed
+            const newHash = this._hashData(topicsArray);
+            if (newHash === this._lastDataHash) {
+                // Data hasn't changed, skip update
+                return;
+            }
+            this._lastDataHash = newHash;
+
+            this.topics = topicsArray;
             await this._setHasTopics(this.topics.length > 0);
             this._onDidChangeTreeData.fire();
         } catch (error) {
-            console.error('Error loading ontology topics from LSP:', error);
+            console.error('OntologyExplorer: Error loading ontology topics:', error);
             await this._setHasTopics(false);
             vscode.window.showErrorMessage(`Failed to load ontology topics: ${error.message}`);
         }

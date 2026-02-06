@@ -2,7 +2,7 @@
   "name": "synesis-explorer",
   "displayName": "Synesis Explorer",
   "description": "VSCode extension for exploring Synesis knowledge synthesis files",
-  "version": "0.5.2",
+  "version": "0.5.9",
   "publisher": "synesis",
   "repository": {
     "type": "git",
@@ -225,6 +225,21 @@
         "key": "ctrl+shift+a",
         "mac": "cmd+shift+a",
         "when": "editorTextFocus && editorLangId == synesis"
+      },
+      {
+        "command": "synesis.code.goToDefinition",
+        "key": "F12",
+        "when": "focusedView == synesisCodeExplorer"
+      },
+      {
+        "command": "synesis.code.rename",
+        "key": "F2",
+        "when": "focusedView == synesisCodeExplorer"
+      },
+      {
+        "command": "synesis.reference.rename",
+        "key": "F2",
+        "when": "focusedView == synesisReferenceExplorer"
       }
     ],
     "menus": {

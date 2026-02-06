@@ -95,35 +95,9 @@ class LspDataProvider {
             return null;
         }
 
-        console.log('DataService.getCodes: workspaceRoot =', workspaceRoot);
-        console.log('DataService.getCodes: result.codes count =', result.codes ? result.codes.length : 0);
-        if (result.codes && result.codes.length > 0) {
-            console.log('DataService.getCodes: First raw code from LSP:', result.codes[0]);
-        }
-
-        if (result.codes && result.codes.length > 0) {
-            const firstCode = result.codes[0];
-            console.log('DataService.getCodes: First code =', firstCode.code);
-            if (firstCode.occurrences && firstCode.occurrences.length > 0) {
-                const firstOcc = firstCode.occurrences[0];
-                console.log('DataService.getCodes: First occurrence from LSP:', {
-                    file: firstOcc.file,
-                    line: firstOcc.line,
-                    column: firstOcc.column
-                });
-            }
-        }
-
         const codes = (result.codes || []).map(c => {
             const occurrences = (c.occurrences || []).map(o => {
                 const resolvedFile = this._resolveFilePath(o.file, workspaceRoot);
-                if (o.file && !resolvedFile) {
-                    console.warn('DataService.getCodes: Failed to resolve file path', {
-                        original: o.file,
-                        workspaceRoot,
-                        resolved: resolvedFile
-                    });
-                }
                 return {
                     file: resolvedFile,
                     line: typeof o.line === 'number' ? o.line - 1 : 0,
@@ -146,14 +120,6 @@ class LspDataProvider {
             };
         });
 
-        if (codes.length > 0 && codes[0].occurrences.length > 0) {
-            console.log('DataService.getCodes: First occurrence after processing:', {
-                file: codes[0].occurrences[0].file,
-                line: codes[0].occurrences[0].line,
-                column: codes[0].occurrences[0].column
-            });
-        }
-
         return codes;
     }
 
@@ -167,24 +133,6 @@ class LspDataProvider {
             return null;
         }
 
-        console.log('DataService.getRelations: workspaceRoot =', workspaceRoot);
-        console.log('DataService.getRelations: result.relations count =', result.relations ? result.relations.length : 0);
-        if (result.relations && result.relations.length > 0) {
-            console.log('DataService.getRelations: First raw relation from LSP:', result.relations[0]);
-            const missingLocCount = result.relations.filter(rel => !(rel && rel.location && rel.location.file)).length;
-            console.log('DataService.getRelations: Relations missing location.file:', missingLocCount);
-        }
-
-        if (result.relations && result.relations.length > 0) {
-            const firstRel = result.relations[0];
-            console.log('DataService.getRelations: First relation from LSP:', {
-                relation: firstRel.relation,
-                from: firstRel.from,
-                to: firstRel.to,
-                location: firstRel.location
-            });
-        }
-
         const grouped = new Map();
         for (const rel of (result.relations || [])) {
             if (!grouped.has(rel.relation)) {
@@ -192,14 +140,6 @@ class LspDataProvider {
             }
             const hasLocation = Boolean(rel.location && rel.location.file);
             const resolvedFile = hasLocation ? this._resolveFilePath(rel.location.file, workspaceRoot) : null;
-
-            if (hasLocation && !resolvedFile) {
-                console.warn('DataService.getRelations: Failed to resolve file path', {
-                    original: rel.location.file,
-                    workspaceRoot,
-                    resolved: resolvedFile
-                });
-            }
 
             grouped.get(rel.relation).triplets.push({
                 from: rel.from,
@@ -281,14 +221,6 @@ class LspDataProvider {
         );
         if (!result || !result.success) {
             return null;
-        }
-        if (Array.isArray(result.annotations) && result.annotations.length > 0) {
-            console.log('DataService.getOntologyAnnotations: First raw annotation from LSP:', result.annotations[0]);
-            const missingFileCount = result.annotations.reduce((count, annotation) => {
-                const occs = Array.isArray(annotation.occurrences) ? annotation.occurrences : [];
-                return count + occs.filter(occ => !occ.file).length;
-            }, 0);
-            console.log('DataService.getOntologyAnnotations: Occurrences missing file:', missingFileCount);
         }
         const annotations = Array.isArray(result.annotations) ? result.annotations : [];
         return annotations.map(annotation => {
@@ -383,25 +315,19 @@ class DataService {
     async _callLsp(method, ...args) {
         const lspReady = Boolean(this.lspClient && this.lspClient.isReady());
 
-        console.log(`DataService.${method}: lspReady=${lspReady}`);
-
         if (lspReady && !this.unsupportedMethods.has(method)) {
             try {
                 const workspaceRoot = this._getWorkspaceRoot();
-                console.log(`DataService.${method}: Calling LSP provider with workspaceRoot=${workspaceRoot}`);
                 const result = await this.lspProvider[method](workspaceRoot, ...args);
                 if (result !== null) {
-                    console.log(`DataService.${method}: LSP returned valid result`);
                     return result;
                 }
 
-                console.warn(`DataService.${method}: LSP returned null - returning empty result`);
                 this._trackLspNull();
                 this._warnLspRequired(method, 'LSP returned empty data');
                 return this._emptyResultFor(method);
             } catch (error) {
                 if (this._isMethodNotFound(error)) {
-                    console.error(`DataService.${method}: LSP method not found (code -32601)`);
                     this.unsupportedMethods.add(method);
                     this._warnUnsupported(method, error);
                     return this._emptyResultFor(method);
@@ -413,7 +339,6 @@ class DataService {
             }
         }
 
-        console.error(`DataService.${method}: LSP required but not available - returning empty result`);
         if (this.unsupportedMethods.has(method)) {
             this._warnLspRequired(method, 'LSP method not supported');
         } else if (!lspReady) {
