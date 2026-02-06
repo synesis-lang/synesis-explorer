@@ -35,19 +35,20 @@ class CodeExplorer {
         if (!codes || codes.length === 0) {
             return 'empty';
         }
-        // Create a simple hash based on codes count and first/last code names
-        const count = codes.length;
-        const first = codes[0]?.code || '';
-        const last = codes[codes.length - 1]?.code || '';
-        const occCount = codes.reduce((sum, c) => sum + (c.occurrences?.length || 0), 0);
-        return `${count}:${first}:${last}:${occCount}`;
+        const parts = codes.map(codeEntry => {
+            const code = String(codeEntry.code || '');
+            const occCount = Array.isArray(codeEntry.occurrences) ? codeEntry.occurrences.length : 0;
+            const usageCount = typeof codeEntry.usageCount === 'number' ? codeEntry.usageCount : occCount;
+            return `${code}:${usageCount}:${occCount}`;
+        });
+        parts.sort();
+        return parts.join('|');
     }
 
     /**
      * Obtém códigos via DataService e atualiza índice
      */
     async refresh() {
-        this.codes.clear();
         this.placeholder = null;
 
         const lspStatus = this._getLspStatus();

@@ -32,17 +32,19 @@ class OntologyAnnotationExplorer {
         if (!annotations || annotations.length === 0) {
             return `empty:${activeFile}`;
         }
-        const count = annotations.length;
-        const first = annotations[0]?.code || '';
-        const occCount = annotations.reduce((sum, a) => sum + (a.occurrences?.length || 0), 0);
-        return `${activeFile}:${count}:${first}:${occCount}`;
+        const parts = annotations.map(annotation => {
+            const code = String(annotation.code || '');
+            const occCount = Array.isArray(annotation.occurrences) ? annotation.occurrences.length : 0;
+            return `${code}:${occCount}`;
+        });
+        parts.sort();
+        return `${activeFile || ''}:${parts.join('|')}`;
     }
 
     /**
      * Obtém annotations via DataService e atualiza índice
      */
     async refresh() {
-        this.annotations.clear();
         this.placeholder = null;
 
         const activeEditor = vscode.window.activeTextEditor;

@@ -31,17 +31,33 @@ class OntologyExplorer {
         if (!topics || topics.length === 0) {
             return 'empty';
         }
-        const count = topics.length;
-        const first = topics[0]?.name || '';
-        const childCount = topics.reduce((sum, t) => sum + (t.children?.length || 0), 0);
-        return `${count}:${first}:${childCount}`;
+        const parts = [];
+        this._flattenTopics(topics, parts);
+        return parts.join('|');
+    }
+
+    _flattenTopics(topics, parts) {
+        if (!Array.isArray(topics)) {
+            return;
+        }
+        for (const topic of topics) {
+            if (!topic) {
+                continue;
+            }
+            const name = String(topic.name || '');
+            const file = String(topic.file || '');
+            const line = typeof topic.line === 'number' ? topic.line : -1;
+            const level = typeof topic.level === 'number' ? topic.level : -1;
+            const children = Array.isArray(topic.children) ? topic.children : [];
+            parts.push(`${name}:${file}:${line}:${level}:${children.length}`);
+            this._flattenTopics(children, parts);
+        }
     }
 
     /**
      * Obtém tópicos via DataService e atualiza índice
      */
     async refresh() {
-        this.topics = [];
         this.placeholder = null;
 
         const lspStatus = this._getLspStatus();

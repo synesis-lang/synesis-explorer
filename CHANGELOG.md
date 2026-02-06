@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.10] - 2026-02-06
+
+### Fixed
+- Code Explorer and Ontology (Annotations) refresh now detect rename changes reliably by using a full data hash and avoiding premature cache clears.
+- Ontology Topics refresh now detects changes reliably using a full tree hash to prevent stale results.
+
+### Removed
+- Removed "Rename Code" from the Code Explorer context menu (F2 and editor context rename remain).
+
 ## [0.5.9] - 2026-02-06
 
 ### Fixed
