@@ -5,6 +5,19 @@ All notable changes to the Synesis extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-08-03
+
+### Note
+
+- **Ecosystem license change does not affect this package.** `synesis`,
+  `synesis-lsp`, `synesis-graph`, and `synesis-coder` migrated from MIT to
+  AGPL-3.0-only + Synesis Data-Output Exception on 2026-08-02 (see
+  `synesis-planning/synesis/new_licence_policy.md`). `synesis-vscode`
+  **remains MIT** — it consumes the ecosystem only through external
+  processes (JSON-RPC to the LSP, CLI to the coder), which does not trigger
+  AGPL copyleft. This must stay true going forward: never bundle the
+  compiler or LSP inside the `.vsix`.
+
 ## [0.9.0] - 2026-07-18
 
 ### Fixed
