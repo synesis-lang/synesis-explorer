@@ -5,6 +5,66 @@ All notable changes to the Synesis extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-08-04
+
+### Added — Snippets de bloco `FIELD`
+
+- A extensão passa a contribuir **snippets** (`contributes.snippets`), até
+  agora ausentes. Um por tipo de campo, acionados por prefixo no autocomplete:
+  `field-chain`, `field-scale`, `field-ordered`, etc.
+
+  ```
+  field-chain  →  FIELD nome_do_campo TYPE CHAIN
+                      SCOPE ITEM
+                      ARITY >= 2
+                      RELATIONS
+                          NOME_DA_RELACAO: quando usar
+                      END RELATIONS
+                      DESCRIPTION o que este campo registra
+                  END FIELD
+  ```
+
+  Resolve a lacuna de quem está **escrevendo** um template: até aqui o
+  autocomplete só operava sobre campos de um template já existente, e não havia
+  como descobrir que `CHAIN` exige `ARITY` e aceita `RELATIONS`.
+
+- **`snippets/synesis.code-snippets` é gerado, não editado à mão.** Produzido
+  por `synesis export-snippets` (compilador ≥ 0.10.0) a partir das regras da
+  linguagem: quais propriedades entram em cada snippet derivam do validador.
+  Regenerar com `npm run build:snippets` após mudanças na linguagem.
+
+  O arquivo é commitado para que a extensão funcione sem exigir Python
+  instalado, e leva cabeçalho `GERADO — NAO EDITAR A MAO`.
+
+- **Nota de escopo:** o language id `synesis` cobre `.syn`, `.synt`, `.synp`,
+  `.syno` e `.synr`, e snippets são registrados por linguagem — então eles
+  também aparecem em arquivos de anotação. O prefixo `field-` mantém o ruído
+  mínimo: só surgem depois que o pesquisador digita essa intenção.
+
+### Added — Blocos de anotação vindos do servidor de linguagem
+
+- Com `synesis-lsp >= 0.21.0`, digitar `SOURCE`, `ITEM` ou `ONTOLOGY` passa a
+  oferecer o **bloco completo com os campos obrigatórios do template daquele
+  projeto** — `slug`+`nome` em um, `lattes_id`+`nome`+`cargo_institucional` em
+  outro. Snippets estáticos não teriam como saber disso; o LSP tem o template
+  carregado.
+
+- Degrada em silêncio: com LSP anterior a 0.21.0 os blocos simplesmente não
+  aparecem, sem erro. Por isso `MIN_LSP_VERSION` permanece em `0.13.0` — ela
+  guarda as *capabilities críticas* dos painéis, não features opcionais.
+
+### Documentation
+
+- README documenta os snippets na seção "What you get", distinguindo os dois
+  níveis: os de `FIELD` vêm das regras do compilador; os de bloco vêm do LSP e
+  por isso conhecem o template do projeto.
+
+### Fixed
+
+- **`CITATION.cff` estava defasado**: versão `0.5.30` (contra `0.9.1` no
+  `package.json`), data de 2026-06-16 e `repository-code` ainda apontando para
+  `synesis-explorer`, nome anterior do repositório. Os três corrigidos.
+
 ## [0.9.1] - 2026-08-03
 
 ### Note

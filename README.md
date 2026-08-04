@@ -88,6 +88,15 @@ Click any entry to open the file at the exact line.
 
 **Real-time diagnostics** — missing required fields, unknown references, codes not in the template, and more, underlined as you edit `.syn`/`.syno`.
 
+**Snippets** — type a prefix and press `Tab` to expand a complete block, then `Tab` again to move between the parts you need to fill in.
+
+| Prefix | Expands to |
+|--------|------------|
+| `field-chain`, `field-scale`, `field-ordered`, … (one per field type) | a `FIELD` block for that type, already carrying whatever it requires — `ARITY` for `CHAIN`, `FORMAT` for `SCALE`, `VALUES` for `ORDERED` |
+| `SOURCE`, `ITEM`, `ONTOLOGY` | an annotation block carrying **your project's** required fields, read from its template |
+
+The `FIELD` snippets are generated from the compiler's own rules, so they never drift from what it accepts. The annotation blocks come from the language server, which is why they know your template: a `SOURCE` block in one project may require `slug` and `nome`, and in another `lattes_id`, `nome` and `cargo_institucional`.
+
 **AI-assisted coding** — send a selection to `synesis-coder` to generate annotations (`Ctrl+Shift+I`; requires `pip install synesis-coder`).
 
 **Two themes** — *Synesis Dark* / *Synesis Light* (`Ctrl+Shift+P` → "Color Theme").

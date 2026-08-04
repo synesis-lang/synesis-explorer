@@ -1,0 +1,129 @@
+// GERADO por `synesis export-snippets` — NAO EDITAR A MAO.
+// Fonte: synesis 0.11.0, modulo language_info.
+// Quais propriedades entram em cada snippet derivam do validador;
+// para regenerar apos mudanca na linguagem, rode o comando de novo.
+{
+  "FIELD QUOTATION": {
+    "prefix": "field-quotation",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE QUOTATION",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE QUOTATION"
+  },
+  "FIELD MEMO": {
+    "prefix": "field-memo",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE MEMO",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE MEMO"
+  },
+  "FIELD CODE": {
+    "prefix": "field-code",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE CODE",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE CODE"
+  },
+  "FIELD CHAIN": {
+    "prefix": "field-chain",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE CHAIN",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    ARITY >= ${3:2}",
+      "    RELATIONS",
+      "        ${4:NOME_DA_RELACAO}: ${5:quando usar}",
+      "    END RELATIONS",
+      "    DESCRIPTION ${6:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE CHAIN (exige ARITY)"
+  },
+  "FIELD TEXT": {
+    "prefix": "field-text",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE TEXT",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE TEXT"
+  },
+  "FIELD DATE": {
+    "prefix": "field-date",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE DATE",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE DATE"
+  },
+  "FIELD SCALE": {
+    "prefix": "field-scale",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE SCALE",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    FORMAT [${3:0}..${4:3}]",
+      "    DESCRIPTION ${5:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE SCALE (exige FORMAT)"
+  },
+  "FIELD ENUMERATED": {
+    "prefix": "field-enumerated",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE ENUMERATED",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    VALUES",
+      "        [1] ${3:primeiro_rotulo}: ${4:descricao}",
+      "        [2] ${5:segundo_rotulo}: ${6:descricao}",
+      "    END VALUES",
+      "    DESCRIPTION ${7:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE ENUMERATED (exige VALUES)"
+  },
+  "FIELD ORDERED": {
+    "prefix": "field-ordered",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE ORDERED",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    VALUES",
+      "        [1] ${3:primeiro_rotulo}: ${4:descricao}",
+      "        [2] ${5:segundo_rotulo}: ${6:descricao}",
+      "    END VALUES",
+      "    DESCRIPTION ${7:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE ORDERED (exige VALUES)"
+  },
+  "FIELD TOPIC": {
+    "prefix": "field-topic",
+    "body": [
+      "FIELD ${1:nome_do_campo} TYPE TOPIC",
+      "    SCOPE ${2|SOURCE,ITEM,ONTOLOGY|}",
+      "    DESCRIPTION ${3:o que este campo registra}",
+      "END FIELD",
+      "$0"
+    ],
+    "description": "Campo TYPE TOPIC"
+  }
+}

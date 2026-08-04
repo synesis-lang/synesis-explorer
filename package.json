@@ -2,7 +2,7 @@
   "name": "synesis",
   "displayName": "Synesis",
   "description": "Knowledge Engineering in VS Code: Official LSP client for Synesis.",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "publisher": "synesis-lang",
   "author": "Christian Maciel De Britto",
   "license": "MIT",
@@ -58,6 +58,12 @@
         "language": "synesis",
         "scopeName": "source.synesis",
         "path": "./syntaxes/synesis.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "synesis",
+        "path": "./snippets/synesis.code-snippets"
       }
     ],
     "semanticTokenScopes": [
@@ -547,6 +553,7 @@
   },
   "scripts": {
     "build": "node esbuild.js",
+    "build:snippets": "synesis export-snippets -o snippets/synesis.code-snippets",
     "build:watch": "node esbuild.js --watch",
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "mocha \"test/unit/**/*.test.js\" --timeout 5000",

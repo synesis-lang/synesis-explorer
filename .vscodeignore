@@ -1,6 +1,6 @@
-# Only dist/, media/, icons/, themes/, syntaxes/, language-configuration.json,
-# package.json, README.md, CHANGELOG.md, LICENSE and the extension icon ship.
-# Everything else is excluded.
+# Only dist/, media/, icons/, themes/, syntaxes/, snippets/,
+# language-configuration.json, package.json, README.md, CHANGELOG.md, LICENSE
+# and the extension icon ship. Everything else is excluded.
 
 # --- Dev tooling / repo metadata ---
 .vscode/**
