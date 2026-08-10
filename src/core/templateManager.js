@@ -199,7 +199,11 @@ class TemplateManager {
                 relations: fieldDef.relations || null,
                 arity: fieldDef.arity || null,
                 values: fieldDef.values || null,
-                guidelines: fieldDef.guidelines || null
+                guidelines: fieldDef.guidelines || null,
+                // description: usada como rótulo legível no abstractViewer.
+                // O synesis/getTemplate ainda não a envia (template_info.py:_serialize_fields);
+                // fica null nesse caminho e o viewer cai no nome do campo.
+                description: fieldDef.description || null
             };
         }
 

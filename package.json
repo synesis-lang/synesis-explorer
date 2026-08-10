@@ -2,7 +2,7 @@
   "name": "synesis",
   "displayName": "Synesis",
   "description": "Knowledge Engineering in VS Code: Official LSP client for Synesis.",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "publisher": "synesis-lang",
   "author": "Christian Maciel De Britto",
   "license": "MIT",
@@ -257,7 +257,7 @@
       },
       {
         "command": "synesis.showGraph",
-        "title": "Synesis: Show Relation Graph (All)"
+        "title": "Synesis: Show Relation Graph per Source"
       },
       {
         "command": "synesis.showGraphPerFile",

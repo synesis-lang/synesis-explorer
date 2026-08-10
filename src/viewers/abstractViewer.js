@@ -20,6 +20,7 @@ const SynesisParser = require('../parsers/synesisParser');
 const projectLoader = require('../core/projectLoader');
 const bibtexParser = require('../parsers/bibtexParser');
 const fuzzyMatcher = require('../utils/fuzzyMatcher');
+const { buildItemCards } = require('./itemCardBuilder');
 
 class AbstractViewer {
     constructor(workspaceScanner, templateManager, dataService) {
@@ -68,9 +69,9 @@ class AbstractViewer {
 
         const abstract = bibtexParser.getAbstract(entry);
         const extracted = await this._extractExcerpts(bibref, projectUri);
-        const excerpts = extracted.excerpts;
+        const cards = extracted.cards;
         const display = extracted.display;
-        const highlighted = abstract ? this.highlightExcerpts(abstract, excerpts) : '';
+        const highlighted = abstract ? this.highlightExcerpts(abstract, cards) : '';
         const hasAbstract = Boolean(abstract);
         if (!hasAbstract) {
             vscode.window.showWarningMessage(`No abstract found for ${bibref}. Showing bibliographic info only.`);
@@ -83,22 +84,23 @@ class AbstractViewer {
             { enableScripts: false }
         );
 
-        panel.webview.html = this.getHtmlContent(bibref, entry, highlighted, excerpts, hasAbstract, display);
+        panel.webview.html = this.getHtmlContent(bibref, entry, highlighted, cards, hasAbstract, display);
     }
 
-    highlightExcerpts(abstract, excerpts) {
+    highlightExcerpts(abstract, cards) {
         if (!abstract) {
             return '';
         }
 
         const matches = [];
 
-        for (let index = 0; index < excerpts.length; index += 1) {
-            if (!excerpts[index].text) {
+        for (let index = 0; index < cards.length; index += 1) {
+            const excerpt = cards[index].excerpt;
+            if (!excerpt || !excerpt.value) {
                 continue;
             }
 
-            const match = fuzzyMatcher.findExcerpt(abstract, excerpts[index].text);
+            const match = fuzzyMatcher.findExcerpt(abstract, excerpt.value);
             if (!match) {
                 continue;
             }
@@ -135,14 +137,22 @@ class AbstractViewer {
         return result;
     }
 
+    /**
+     * Obtém os ITEMs de um bibref e monta um card por ITEM.
+     *
+     * Os dois caminhos (LSP e parser local) apenas NORMALIZAM seus dados; a
+     * montagem é única, em itemCardBuilder. Antes, cada caminho tinha sua própria
+     * cópia da lógica de montagem — divergir era questão de tempo.
+     */
     async _extractExcerpts(bibref, projectUri) {
+        const registry = await this.templateManager.loadTemplate(projectUri);
+
         // Try LSP first — eliminates all local I/O and regex parsing
         if (this.dataService) {
             try {
                 const lspItems = await this.dataService.getExcerpts(bibref);
                 if (lspItems && lspItems.length > 0) {
-                    const registry = await this.templateManager.loadTemplate(projectUri);
-                    return this._buildExcerptsFromLspItems(lspItems, registry);
+                    return this._buildResult(lspItems.map(normalizeLspItem), registry);
                 }
             } catch (err) {
                 console.warn('AbstractViewer._extractExcerpts: LSP getExcerpts failed, falling back to local:', err.message);
@@ -150,234 +160,96 @@ class AbstractViewer {
         }
 
         // Fallback: local I/O + regex parsing (kept during transition)
-        return this._extractExcerptsLocal(bibref, projectUri);
+        const localItems = await this._collectLocalItems(bibref, projectUri);
+        return this._buildResult(localItems, registry);
     }
 
-    _buildExcerptsFromLspItems(lspItems, registry) {
-        const quotationFields = getFieldsByType(registry, 'QUOTATION');
-        const memoFields = getFieldsByType(registry, 'MEMO');
-        const chainFields = getFieldsByType(registry, 'CHAIN');
-        const codeFields = getFieldsByType(registry, 'CODE');
-
-        const useMemoAsExcerpt = quotationFields.length === 0 && memoFields.length > 0;
-        const excerptFields = quotationFields.length > 0 ? quotationFields : (useMemoAsExcerpt ? memoFields : []);
-        const showNote = memoFields.length > 0 && !useMemoAsExcerpt;
-        const showChain = chainFields.length > 0;
-        const showCodes = !showChain && codeFields.length > 0;
-
-        const excerpts = [];
-
-        for (const item of lspItems) {
-            const fields = item.extra_fields || {};
-            // Normalise field names to lowercase for lookup
-            const fieldsLower = {};
-            for (const [k, v] of Object.entries(fields)) {
-                fieldsLower[k.toLowerCase()] = v;
-            }
-
-            const noteValues = showNote ? collectFieldValues(fieldsLower, memoFields) : [];
-            const chainValues = showChain ? collectFieldValues(fieldsLower, chainFields) : [];
-
-            // Codes: from extra_fields CODE/code fields, or from item.codes
-            let codes = [];
-            if (showCodes) {
-                codes = extractCodesFromFields(fieldsLower, codeFields);
-                if (codes.length === 0 && Array.isArray(item.codes) && item.codes.length > 0) {
-                    codes = item.codes.map(String);
-                }
-            }
-
-            // Chain fallback: if chainValues empty but item.chains has data
-            let effectiveChainValues = chainValues;
-            if (showChain && chainValues.length === 0 && Array.isArray(item.chains) && item.chains.length > 0) {
-                effectiveChainValues = item.chains.map(String);
-            }
-
-            if (excerptFields.length === 0) {
-                const maxPairs = Math.max(noteValues.length, effectiveChainValues.length, codes.length > 0 ? 1 : 0);
-                if (maxPairs === 0) continue;
-                for (let i = 0; i < maxPairs; i++) {
-                    excerpts.push({
-                        text: '',
-                        note: noteValues[i] || '',
-                        chain: effectiveChainValues[i] || '',
-                        codes: i === 0 ? codes : [],
-                        line: item.line || 0,
-                        file: item.file || ''
-                    });
-                }
-                continue;
-            }
-
-            for (const fieldName of excerptFields) {
-                const rawValue = fieldsLower[fieldName.toLowerCase()];
-                if (!rawValue) continue;
-                const excerptText = normalizeExcerpt(Array.isArray(rawValue) ? rawValue[0] || '' : String(rawValue));
-                if (!excerptText) continue;
-
-                if (noteValues.length <= 1 && effectiveChainValues.length <= 1) {
-                    excerpts.push({
-                        text: excerptText,
-                        note: noteValues[0] || '',
-                        chain: effectiveChainValues[0] || '',
-                        codes,
-                        line: item.line || 0,
-                        file: item.file || ''
-                    });
-                } else {
-                    const maxPairs = Math.max(noteValues.length, effectiveChainValues.length);
-                    for (let i = 0; i < maxPairs; i++) {
-                        excerpts.push({
-                            text: excerptText,
-                            note: noteValues[i] || '',
-                            chain: effectiveChainValues[i] || '',
-                            codes: i === 0 ? codes : [],
-                            line: item.line || 0,
-                            file: item.file || ''
-                        });
-                    }
-                }
-            }
-        }
-
-        return { excerpts, display: { showNote, showChain, showCodes } };
+    _buildResult(normalizedItems, registry) {
+        const { cards, display } = buildItemCards(normalizedItems, registry);
+        return {
+            cards,
+            display: { ...display, relationSet: buildRelationSet(registry) }
+        };
     }
 
-    async _extractExcerptsLocal(bibref, projectUri) {
-        const excerpts = [];
-        const registry = await this.templateManager.loadTemplate(projectUri);
-        const quotationFields = getFieldsByType(registry, 'QUOTATION');
-        const memoFields = getFieldsByType(registry, 'MEMO');
-        const chainFields = getFieldsByType(registry, 'CHAIN');
-        const codeFields = getFieldsByType(registry, 'CODE');
-
-        const useMemoAsExcerpt = quotationFields.length === 0 && memoFields.length > 0;
-        const excerptFields = quotationFields.length > 0 ? quotationFields : (useMemoAsExcerpt ? memoFields : []);
-        const showNote = memoFields.length > 0 && !useMemoAsExcerpt;
-        const showChain = chainFields.length > 0;
-        const showCodes = !showChain && codeFields.length > 0;
-
+    /**
+     * Lê os .syn do workspace e devolve os ITEMs do bibref já normalizados.
+     */
+    async _collectLocalItems(bibref, projectUri) {
+        const items = [];
         const synFiles = await this.scanner.findSynFiles(projectUri);
 
         for (const fileUri of synFiles) {
             const content = await vscode.workspace.fs.readFile(fileUri);
-            const text = content.toString();
-            const filePath = fileUri.fsPath;
+            const parsed = this.parser.parseItems(content.toString(), fileUri.fsPath);
 
-            const items = this.parser.parseItems(text, filePath);
-            const filtered = items.filter(item => item.bibref === bibref);
-
-            for (const item of filtered) {
-                // Coletar notes, chains e codes como arrays (não concatenar)
-                const noteValues = showNote ? collectFieldValues(item.fields, memoFields) : [];
-                const chainValues = showChain ? collectFieldValues(item.fields, chainFields) : [];
-                const codes = showCodes ? extractCodesFromFields(item.fields, codeFields) : [];
-
-                if (excerptFields.length === 0) {
-                    // Se não há excerpt fields, criar excerpts para cada par (note, chain)
-                    const maxPairs = Math.max(noteValues.length, chainValues.length, codes.length > 0 ? 1 : 0);
-
-                    if (maxPairs === 0) {
-                        continue;
-                    }
-
-                    for (let i = 0; i < maxPairs; i++) {
-                        excerpts.push({
-                            text: '',
-                            note: noteValues[i] || '',
-                            chain: chainValues[i] || '',
-                            codes: i === 0 ? codes : [],
-                            line: item.line,
-                            file: filePath
-                        });
-                    }
+            for (const item of parsed) {
+                if (item.bibref !== bibref) {
                     continue;
                 }
-
-                // Se há excerpt fields (ex: text), criar múltiplos excerpts se houver múltiplos notes/chains
-                for (const fieldName of excerptFields) {
-                    if (!item.fields[fieldName]) {
-                        continue;
-                    }
-
-                    const excerptText = normalizeExcerpt(item.fields[fieldName]);
-                    if (!excerptText) {
-                        continue;
-                    }
-
-                    // Se há apenas 1 note e 1 chain (ou nenhum), criar 1 excerpt (comportamento original)
-                    if (noteValues.length <= 1 && chainValues.length <= 1) {
-                        excerpts.push({
-                            text: excerptText,
-                            note: noteValues[0] || '',
-                            chain: chainValues[0] || '',
-                            codes,
-                            line: item.line,
-                            file: filePath
-                        });
-                    } else {
-                        // Se há múltiplos notes/chains, criar um excerpt para cada par
-                        const maxPairs = Math.max(noteValues.length, chainValues.length);
-
-                        for (let i = 0; i < maxPairs; i++) {
-                            excerpts.push({
-                                text: excerptText,
-                                note: noteValues[i] || '',
-                                chain: chainValues[i] || '',
-                                codes: i === 0 ? codes : [],
-                                line: item.line,
-                                file: filePath
-                            });
-                        }
-                    }
-                }
+                items.push(normalizeLocalItem(item, fileUri.fsPath));
             }
         }
 
-        return {
-            excerpts,
-            display: {
-                showNote,
-                showChain,
-                showCodes
-            }
-        };
+        return items;
     }
 
-    getHtmlContent(bibref, entry, abstractHtml, excerpts, hasAbstract, display) {
+    getHtmlContent(bibref, entry, abstractHtml, cards, hasAbstract, display) {
         const bibInfo = buildBibInfo(entry);
-        const legendHtml = excerpts.map((excerpt, index) => {
+
+        // Um card por bloco ITEM. A cor indexa o ITEM, mantendo a correspondência
+        // com o destaque no abstract.
+        const cardsHtml = cards.map((card, index) => {
             const color = this.colors[index % this.colors.length];
-            const shortText = excerpt.text.length > 80
-                ? `${excerpt.text.slice(0, 80)}...`
-                : excerpt.text;
-            const label = excerpt.text ? `Excerpt ${index + 1}: ${escapeHtml(shortText)}` : `Entry ${index + 1}`;
-            const noteHtml = display.showNote && excerpt.note
-                ? `<div class="note-line"><em>Note:</em> ${escapeHtml(excerpt.note)}</div>`
+            const excerptHtml = card.excerpt
+                ? `<div class="card-excerpt">${escapeHtml(card.excerpt.value)}</div>`
                 : '';
-            const chainHtml = display.showChain && excerpt.chain
-                ? `<div class="chain-line"><em>Chain:</em> ${formatChain(excerpt.chain)}</div>`
+
+            const chainsHtml = card.chains.length > 0
+                ? `<div class="card-section">
+                     <div class="card-section-label">${card.chains.length === 1 ? 'Chain' : `Chains (${card.chains.length})`}</div>
+                     ${card.chains.map(chain =>
+                         `<div class="chain-line">${formatChain(chain, display.relationSet)}</div>`
+                     ).join('')}
+                   </div>`
                 : '';
-            const codesHtml = display.showCodes && excerpt.codes && excerpt.codes.length > 0
-                ? `<div class="chain-line"><em>Codes:</em> ${formatCodes(excerpt.codes)}</div>`
+
+            const codesHtml = card.codes.length > 0
+                ? `<div class="card-section">
+                     <div class="card-section-label">Codes</div>
+                     <div class="chain-line">${formatCodes(card.codes)}</div>
+                   </div>`
+                : '';
+
+            const fieldsHtml = card.fields.length > 0
+                ? `<div class="card-fields">
+                     ${card.fields.map(field => renderField(field)).join('')}
+                   </div>`
                 : '';
 
             return `
-        <div class="legend-item">
-          <div style="display: flex; align-items: flex-start;">
+        <div class="item-card">
+          <div class="card-header">
             <span class="legend-color" style="background-color: ${color};"></span>
-            <div>
-              <div class="legend-excerpt">${label}</div>
-              <div class="legend-description">
-                ${noteHtml}
-                ${chainHtml}
-                ${codesHtml}
-              </div>
-            </div>
+            <span class="card-title">ITEM ${index + 1}</span>
+            ${card.line ? `<span class="card-location">line ${card.line}</span>` : ''}
           </div>
+          ${excerptHtml}
+          ${fieldsHtml}
+          ${chainsHtml}
+          ${codesHtml}
         </div>
       `;
         }).join('');
+
+        const highlightedCount = cards.filter(card => card.excerpt && card.excerpt.value).length;
+        const statsParts = [`<strong>${cards.length}</strong> ITEM${cards.length === 1 ? '' : 's'}`];
+        if (display.chainCount > 0) {
+            statsParts.push(`<strong>${display.chainCount}</strong> chain${display.chainCount === 1 ? '' : 's'}`);
+        }
+        if (hasAbstract) {
+            statsParts.push(`<strong>${highlightedCount}</strong> excerpt${highlightedCount === 1 ? '' : 's'} in abstract`);
+        }
 
         const bibInfoHtml = buildBibInfoHtml(bibInfo, bibref);
         const abstractSection = hasAbstract ? `
@@ -677,6 +549,116 @@ class AbstractViewer {
             font-weight: 700;
             font-size: 15px;
           }
+
+          /* ---- Card de ITEM: um card por bloco ITEM ---- */
+
+          .item-card {
+            padding: 18px 20px;
+            margin-bottom: 16px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            transition: var(--transition);
+          }
+
+          .item-card:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+          }
+
+          .card-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+          }
+
+          .card-title {
+            font-weight: 700;
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            color: var(--text-secondary);
+          }
+
+          .card-location {
+            font-size: 11.5px;
+            color: var(--text-secondary);
+            font-family: 'Consolas', 'Monaco', monospace;
+            margin-left: auto;
+          }
+
+          .card-excerpt {
+            font-size: 15px;
+            line-height: 1.65;
+            padding: 12px 14px;
+            margin-bottom: 14px;
+            background: var(--surface);
+            border-left: 3px solid var(--primary);
+            border-radius: 6px;
+          }
+
+          .card-fields {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 10px 18px;
+            margin-bottom: 14px;
+          }
+
+          .card-field {
+            font-size: 13.5px;
+            line-height: 1.5;
+          }
+
+          .card-field-label {
+            display: block;
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--text-secondary);
+            margin-bottom: 3px;
+          }
+
+          .card-field-value {
+            color: var(--text);
+          }
+
+          /* Campos longos (MEMO/TEXT) ocupam a linha inteira do grid */
+          .card-field.is-long {
+            grid-column: 1 / -1;
+          }
+
+          .card-field.is-long .card-field-value {
+            font-style: italic;
+            color: var(--text-secondary);
+          }
+
+          .card-section {
+            margin-top: 12px;
+          }
+
+          .card-section-label {
+            font-size: 10.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: var(--text-secondary);
+            margin-bottom: 6px;
+          }
+
+          .card-section .chain-line {
+            margin-bottom: 6px;
+          }
+
+          .value-badge {
+            display: inline-block;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 2px 9px;
+            font-size: 12.5px;
+            font-weight: 600;
+          }
         </style>
       </head>
       <body>
@@ -685,11 +667,11 @@ class AbstractViewer {
         </div>
         ${abstractSection}
         <div class="legend">
-          <h2>Excerpts (${excerpts.length} found)</h2>
-          ${legendHtml}
+          <h2>Annotations</h2>
+          ${cardsHtml || '<p class="chain-empty">No ITEM blocks found for this reference.</p>'}
         </div>
         <div class="stats">
-          Excerpts encontrados: <strong>${excerpts.length}</strong>
+          ${statsParts.join(' &middot; ')}
         </div>
       </body>
       </html>
@@ -731,10 +713,48 @@ class AbstractViewer {
 }
 
 function normalizeExcerpt(text) {
-    return text.replace(/\s+/g, ' ').trim();
+    return String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
 }
 
-function formatChain(chainText) {
+/**
+ * Converte um item do synesis/getExcerpts no formato NormalizedItem.
+ * Nomes de campo em minúsculas para lookup insensível a caixa.
+ */
+function normalizeLspItem(item) {
+    const fields = {};
+    for (const [key, value] of Object.entries(item.extra_fields || {})) {
+        fields[String(key).toLowerCase()] = value;
+    }
+
+    return {
+        fields,
+        codes: Array.isArray(item.codes) ? item.codes : [],
+        chains: Array.isArray(item.chains) ? item.chains : [],
+        line: item.line || 0,
+        file: item.file || ''
+    };
+}
+
+/**
+ * Converte um item do parser local (fallback) no formato NormalizedItem.
+ * O parser local não separa codes/chains do resto — vêm todos em `fields`.
+ */
+function normalizeLocalItem(item, filePath) {
+    const fields = {};
+    for (const [key, value] of Object.entries(item.fields || {})) {
+        fields[String(key).toLowerCase()] = value;
+    }
+
+    return {
+        fields,
+        codes: [],
+        chains: [],
+        line: item.line || 0,
+        file: filePath || ''
+    };
+}
+
+function formatChain(chainText, relationSet) {
     const cleaned = normalizeExcerpt(chainText || '');
     if (!cleaned) {
         return '<span class="chain-empty">No chain</span>';
@@ -750,11 +770,36 @@ function formatChain(chainText) {
     }
 
     const html = tokens.map(token => {
-        const cssClass = isRelationToken(token) ? 'factor-link' : 'factor-tag';
+        const cssClass = isRelationToken(token, relationSet) ? 'factor-link' : 'factor-tag';
         return `<span class="${cssClass}">${escapeHtml(token)}</span>`;
     }).join('');
 
     return `<span class="factor-chain">${html}</span>`;
+}
+
+/**
+ * Renderiza um campo genérico do card.
+ *
+ * Tipos com valor discreto (ENUMERATED/ORDERED/SCALE) viram badge; texto longo
+ * ocupa a linha inteira do grid. É o que faz ENUMERATED e SCALE aparecerem — a
+ * versão anterior filtrava por 4 tipos e descartava todos os demais.
+ */
+function renderField(field) {
+    const isBadgeType = ['ENUMERATED', 'ORDERED', 'SCALE', 'BOOLEAN'].includes(field.type);
+    const joined = field.values.join(' · ');
+    const isLong = !isBadgeType && joined.length > 90;
+
+    const valueHtml = isBadgeType
+        ? field.values.map(v => `<span class="value-badge">${escapeHtml(v)}</span>`).join(' ')
+        : escapeHtml(joined);
+
+    const title = field.description ? ` title="${escapeHtml(field.description)}"` : '';
+
+    return `
+      <div class="card-field${isLong ? ' is-long' : ''}"${title}>
+        <span class="card-field-label">${escapeHtml(field.label)}</span>
+        <span class="card-field-value">${valueHtml}</span>
+      </div>`;
 }
 
 function formatCodes(codes) {
@@ -769,56 +814,68 @@ function formatCodes(codes) {
     return `<span class="factor-chain">${html}</span>`;
 }
 
-function isRelationToken(token) {
-    const relationTokens = new Set([
-        'INFLUENCES', 'ENABLES', 'CONSTRAINS', 'CONTESTED-BY', 'RELATES-TO',
-        'CAUSES', 'PREVENTS', 'REQUIRES', 'EXCLUDES', 'CORRELATES', 'DEPENDS-ON'
-    ]);
+/**
+ * Constrói o conjunto de relações CHAIN declaradas no template do projeto.
+ *
+ * Substitui uma lista fixa de nomes que pertencia a outro projeto: no face85 ela
+ * acertava 2 das 11 relações declaradas, e as 9 restantes eram renderizadas como
+ * conceito — indistinguíveis, na tela, dos termos que elas ligam. O README diz
+ * que nada é hardcoded; esta view, cuja função é justamente explicar o template,
+ * era a violação literal desse princípio.
+ *
+ * @param {Object} registry - Field registry (templateManager.buildFieldRegistry)
+ * @returns {Set<string>} Nomes de relação em caixa alta
+ */
+function buildRelationSet(registry) {
+    const relations = new Set();
 
-    return relationTokens.has(token.toUpperCase());
-}
-
-function collectFieldValues(fields, names) {
-    const values = [];
-    for (const name of names) {
-        const fieldValue = fields[name];
-        if (!fieldValue) {
+    for (const def of Object.values(registry || {})) {
+        if (!def || def.type !== 'CHAIN' || !def.relations) {
             continue;
         }
 
-        // Suporta campos com múltiplos valores (arrays)
-        if (Array.isArray(fieldValue)) {
-            for (const val of fieldValue) {
-                const normalized = normalizeExcerpt(val);
-                if (normalized) {
-                    values.push(normalized);
-                }
-            }
-        } else {
-            const normalized = normalizeExcerpt(fieldValue);
+        // O LSP envia list[str]; o parser local pode enviar {nome: descrição}.
+        const names = Array.isArray(def.relations)
+            ? def.relations
+            : Object.keys(def.relations);
+
+        for (const name of names) {
+            const normalized = String(name).trim().toUpperCase();
             if (normalized) {
-                values.push(normalized);
-            }
-        }
-    }
-    return values;
-}
-
-function extractCodesFromFields(fields, names) {
-    const values = collectFieldValues(fields, names);
-    const codes = [];
-
-    for (const value of values) {
-        const parts = value.split(',').map(part => part.trim()).filter(Boolean);
-        for (const part of parts) {
-            if (!codes.includes(part)) {
-                codes.push(part);
+                relations.add(normalized);
             }
         }
     }
 
-    return codes;
+    return relations;
 }
+
+/**
+ * Decide se um token de chain é uma relação.
+ *
+ * Com o conjunto do template, a decisão é exata. Sem ele (template sem RELATIONS
+ * declaradas, ou LSP antigo que não envia o campo), cai numa heurística
+ * estrutural — nunca numa lista de nomes, que só voltaria a dessincronizar.
+ *
+ * @param {string} token
+ * @param {Set<string>|null} relationSet
+ * @returns {boolean}
+ */
+function isRelationToken(token, relationSet) {
+    const normalized = String(token || '').trim().toUpperCase();
+    if (!normalized) {
+        return false;
+    }
+
+    if (relationSet && relationSet.size > 0) {
+        return relationSet.has(normalized);
+    }
+
+    // Heurística de fallback: relações são escritas em CAIXA_ALTA sem espaços.
+    return /^[A-Z][A-Z0-9_-]*$/.test(normalized) && normalized === String(token).trim();
+}
+
+
 
 function buildBibInfo(entry) {
     const tags = entry?.entryTags || {};
@@ -903,11 +960,6 @@ function sanitizeBibValue(value) {
         .trim();
 }
 
-function getFieldsByType(registry, type) {
-    return Object.entries(registry)
-        .filter(([, def]) => def.type === type)
-        .map(([name]) => name);
-}
 
 function escapeHtml(text) {
     if (!text) {
@@ -955,3 +1007,9 @@ function _bibrefFromBlocks(blocks, document, cursorOffset) {
 }
 
 module.exports = AbstractViewer;
+
+// Expostos para teste unitário. A classe continua sendo o export default —
+// requerer `vscode` inviabiliza testar a formatação de chain isoladamente.
+module.exports.buildRelationSet = buildRelationSet;
+module.exports.isRelationToken = isRelationToken;
+module.exports.formatChain = formatChain;

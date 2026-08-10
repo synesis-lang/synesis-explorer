@@ -5,6 +5,129 @@ All notable changes to the Synesis extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed — `abstractViewer`
+
+- **Relações CHAIN eram uma lista fixa, escrita para outro projeto**
+  (`src/viewers/abstractViewer.js`)
+  - `isRelationToken()` comparava o token contra 11 nomes literais
+    (`INFLUENCES`, `CONTESTED-BY`, …). Medido contra `face85.synt`, que declara
+    11 relações: a lista **acertava 2** (`CAUSES`, `ENABLES`) e carregava **9
+    nomes inexistentes** no projeto. As 9 relações reais restantes —
+    `MEASURES`, `PART_OF`, `APPLIES`, `USES`, `INHIBITS`, `PREDICTS`,
+    `CONTRASTS_WITH`, `ASSOCIATED_WITH`, `RELATES_TO` — renderizavam como
+    `factor-tag`, **visualmente idênticas a um conceito**: `Trust MEASURES
+    Acceptance` lia-se como três conceitos irmãos, não como uma relação.
+  - Até `RELATES-TO` falhava: hífen na lista contra `RELATES_TO` (underscore) no
+    template. A lista nunca se sincronizou com projeto algum.
+  - Contradizia o princípio declarado no README — *"nothing is hardcoded […]
+    relations […] come from the project template"* — dentro justamente da view
+    cuja função é explicar o template a quem não lê Synesis.
+  - Agora `buildRelationSet()` deriva o conjunto do registry do template, que o
+    viewer **já recebia**. Sem `RELATIONS` declaradas (ou com LSP antigo), cai
+    numa heurística estrutural (CAIXA_ALTA sem espaços) — nunca de volta a uma
+    lista de nomes.
+
+- **Campos MEMO não apareciam — defeito no LSP, não na extensão**
+  - Corrigir a montagem do card não bastava: `synesis/getExcerpts` **nunca
+    enviava** campos MEMO nem QUOTATION. O transformer do compilador promove
+    `note`/`notes`/`memo`/`memos` para `item.notes` e `quote`/`quotation` para
+    `item.quote`, fora de `extra_fields` — e o LSP serializava só
+    `extra_fields`. No face85, `extra_fields` chegava com `text`, `zone` e
+    `confidence`, sem o `memo` que todos os ITEMs têm.
+  - Corrigido em `synesis-lsp 0.22.0` (`_reinsert_promoted_fields`, ver o
+    CHANGELOG de lá). **Requer `synesis-lsp >= 0.22.0`**; com versão anterior o
+    campo MEMO continua ausente, pois o dado não chega à extensão.
+  - Do lado da extensão, MEMO é um campo comum — coberto por testes de regressão
+    em `itemCardBuilder.test.js`.
+
+- **Campos do template não chegavam à tela**
+  - A montagem filtrava por 4 tipos (`QUOTATION`/`MEMO`/`CHAIN`/`CODE`) e emitia
+    um objeto de forma fixa `{text, note, chain, codes}`. Todo `ENUMERATED`,
+    `SCALE`, `ORDERED` e `TEXT` do template **não tinha para onde ir** e era
+    descartado em silêncio.
+  - Havia ainda `showCodes = !showChain && …`: os códigos sumiam sempre que o
+    template tinha CHAIN — o caso comum.
+  - O card agora renderiza **todos** os campos, na ordem de declaração do
+    template, usando a `description` como rótulo legível (`zone` → "Zona
+    retórica do trecho"). `ENUMERATED`/`ORDERED`/`SCALE` viram badge; texto
+    longo ocupa a linha inteira.
+
+- **Um bloco ITEM virava vários cards**
+  - O laço `maxPairs` pareava a i-ésima note com a i-ésima chain — um
+    pareamento **que não existe no dado**: são listas independentes, e o índice
+    comum era invenção da renderização. Um ITEM com 4 chains virava 4 cards
+    repetindo o mesmo trecho, cada um em cor diferente da paleta, sugerindo
+    trechos distintos no abstract. `codes: i === 0 ? codes : []` deixava os
+    códigos só no primeiro, fazendo os demais parecerem itens sem código.
+  - Agora **um ITEM = um card**, com as chains agrupadas dentro dele. O contador
+    passa a ser conferível contra o `.syn`: `N ITEMs · M chains · K excerpts in
+    abstract` — o primeiro número casa com `grep -c "^ITEM" arquivo.syn`.
+
+- **Duplicação entre os dois caminhos de extração**
+  - `_buildExcerptsFromLspItems` e `_extractExcerptsLocal` eram quase idênticos
+    (~90 linhas cada): toda correção precisava ser feita duas vezes e divergir
+    era questão de tempo. A montagem foi extraída para
+    `src/viewers/itemCardBuilder.js`, sem dependência de `vscode` — os dois
+    caminhos apenas **normalizam** seus dados. Mesmo padrão de
+    `src/lsp/sharedWatchTargets.js`, e pela mesma razão: testável em unidade.
+
+### Fixed — `graphViewer`
+
+- **Parte do grafo ficava inacessível com zoom**
+  - `.mermaid-wrapper` usava `display:flex` com `justify-content/align-items:
+    center`. Quando o conteúdo excede o container, a centralização transborda
+    para **os dois lados**, e o overflow no início do eixo (esquerda/topo) fica
+    fora do alcance do scroll — `scrollLeft = 0` já é o limite mínimo e a área
+    cortada está em coordenada negativa.
+  - O código tentava mitigar zerando o scroll a cada zoom (com o comentário
+    *"so the left edge is never cut off"*), o que não recuperava nada e ainda
+    jogava a vista para o canto a cada passo. Trocado por `display:block` +
+    `margin:auto` no filho: centraliza quando cabe, encosta no início quando não
+    cabe.
+
+- **Zoom não preservava o ponto de interesse** — crescia a partir da origem,
+  deslocando o que estava sob o cursor. `updateZoom()` agora aceita uma âncora e
+  recalcula o scroll para mantê-la parada; a roda do mouse ancora no cursor.
+
+### Added — `graphViewer`
+
+- **Pan por arraste** — navegar só por scrollbars num grafo com zoom era
+  desconfortável. Botão esquerdo arrasta o grafo, com o cursor sinalizando o
+  estado (`grab`/`grabbing`), via Pointer Events com captura.
+
+### Changed
+
+- **`synesis.showGraph` renomeado** de "Show Relation Graph (All)" para
+  **"Show Relation Graph per Source"**. O comando sempre filtrou pelo SOURCE sob
+  o cursor (`_findBibref()` → `bibref` → `_triples_for_bibref` no LSP); o rótulo
+  "(All)" prometia o projeto inteiro e entregava um SOURCE. O cabeçalho do painel
+  passa a dizer `Scope:` em vez de `Reference:`, e o escopo por SOURCE se
+  identifica como tal.
+  - O grafo de **projeto inteiro** existe no servidor (`bibref=None`) e continua
+    sem comando que o exponha. Deliberado: em `social_acceptance` são 1388+ nós,
+    volume que trava o Mermaid. Depende do ranking top-N descrito em
+    `synesis-planning/synesis-vscode/full_graph_explorer.md`.
+
+### Added — testes
+
+- `test/unit/itemCardBuilder.test.js` (21 testes) — um ITEM = um card, todos os
+  campos, ordem do template, codes com chain presente, robustez.
+- `test/unit/chainRelations.test.js` (16 testes) — as 11 relações do face85,
+  rejeição de relações de outro projeto, `RELATES_TO` vs `RELATES-TO`, fallback
+  sem template, escape de HTML.
+- Suíte: 139 → **176 testes**.
+
+### Nota para o `synesis-lsp`
+
+`synesis/getTemplate` não envia a `description` dos campos
+(`template_info.py:_serialize_fields`). O `abstractViewer` a usa como rótulo
+legível e cai no nome do campo quando ausente — o caminho LSP hoje sempre cai.
+Expor `description` (e o dict completo de `relations`, hoje reduzido a
+`list(...keys())`, descartando a descrição de cada relação) tornaria os rótulos
+e tooltips legíveis sem mudança na extensão.
+
 ## [0.10.0] - 2026-08-04
 
 ### Added — Snippets de bloco `FIELD`

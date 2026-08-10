@@ -43,7 +43,7 @@ class GraphViewer {
             return;
         }
 
-        this.showGraphPanel(`@${bibref}`, result.mermaidCode);
+        this.showGraphPanel(`Source: @${bibref}`, result.mermaidCode);
     }
 
     async showGraphForFile() {
@@ -252,13 +252,17 @@ class GraphViewer {
             position: relative;
         }
 
+        /* display:block + margin:auto no filho, NAO flex centering.
+           Um container flex com justify/align-content:center transborda para os
+           DOIS lados quando o conteudo excede o container, e o overflow no inicio
+           do eixo (esquerda/topo) fica fora do alcance do scroll — scrollLeft=0 ja
+           e o limite minimo, e a area cortada esta em coordenada negativa.
+           margin:auto centraliza quando cabe e encosta no inicio quando nao cabe. */
         .mermaid-wrapper {
             width: 100%;
             height: 100%;
             overflow: auto;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            display: block;
             background-color: white;
             border-radius: var(--radius);
             box-shadow: var(--shadow);
@@ -266,9 +270,9 @@ class GraphViewer {
 
         .mermaid {
             padding: 20px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            width: fit-content;
+            min-width: min-content;
+            margin: auto;
         }
 
         .mermaid svg {
@@ -314,7 +318,7 @@ class GraphViewer {
     <div class="header">
         <div class="header-left">
             <h1>Graph Viewer</h1>
-            <p>Reference: <strong>${escapeHtml(reference)}</strong></p>
+            <p>Scope: <strong>${escapeHtml(reference)}</strong></p>
         </div>
         <div class="zoom-controls">
             <button class="zoom-btn" id="btnZoomOut" title="Zoom out">
@@ -356,19 +360,38 @@ ${mermaidCode}
             return content ? content.querySelector('svg') : null;
         }
 
-        // Zoom via redimensionamento direto do SVG — o scroll container vê o tamanho real
-        function updateZoom(newZoom) {
+        // Zoom via redimensionamento direto do SVG — o scroll container vê o tamanho real.
+        // anchor = ponto do viewport a preservar (x,y em coords do wrapper). Sem ele o
+        // zoom "foge": o conteudo cresce a partir da origem e o que estava sob o cursor
+        // se desloca. Com ele, o ponto ancorado fica parado e o zoom vai para onde o
+        // usuario esta olhando.
+        function updateZoom(newZoom, anchor) {
             if (naturalWidth === 0 || naturalHeight === 0) return;
+            const wrapper = document.getElementById('mermaidWrapper');
+            const previousZoom = currentZoom;
             currentZoom = Math.max(minZoom, Math.min(maxZoom, newZoom));
+
+            // Posicao do ponto ancorado no conteudo, antes do resize
+            let contentX = 0, contentY = 0, viewX = 0, viewY = 0;
+            if (wrapper) {
+                viewX = anchor ? anchor.x : wrapper.clientWidth / 2;
+                viewY = anchor ? anchor.y : wrapper.clientHeight / 2;
+                contentX = (wrapper.scrollLeft + viewX) / previousZoom;
+                contentY = (wrapper.scrollTop + viewY) / previousZoom;
+            }
+
             const svg = getSvg();
             if (svg) {
                 svg.setAttribute('width', Math.round(naturalWidth * currentZoom) + 'px');
                 svg.setAttribute('height', Math.round(naturalHeight * currentZoom) + 'px');
             }
             document.getElementById('zoomLevel').textContent = Math.round(currentZoom * 100) + '%';
-            // Reset scroll so the left edge is never cut off after resize
-            const wrapper = document.getElementById('mermaidWrapper');
-            if (wrapper) { wrapper.scrollLeft = 0; wrapper.scrollTop = 0; }
+
+            // Reposiciona o scroll para manter o ponto ancorado sob o cursor
+            if (wrapper) {
+                wrapper.scrollLeft = contentX * currentZoom - viewX;
+                wrapper.scrollTop  = contentY * currentZoom - viewY;
+            }
         }
 
         function zoomIn()  { updateZoom(currentZoom + zoomStep); }
@@ -386,9 +409,53 @@ ${mermaidCode}
         document.getElementById('mermaidWrapper').addEventListener('wheel', (e) => {
             if (e.ctrlKey || e.metaKey) {
                 e.preventDefault();
-                updateZoom(currentZoom + (e.deltaY > 0 ? -zoomStep : zoomStep));
+                const wrapper = document.getElementById('mermaidWrapper');
+                const rect = wrapper.getBoundingClientRect();
+                updateZoom(
+                    currentZoom + (e.deltaY > 0 ? -zoomStep : zoomStep),
+                    { x: e.clientX - rect.left, y: e.clientY - rect.top }
+                );
             }
         }, { passive: false });
+
+        // Pan por arraste: navegar so por scrollbars num grafo com zoom e desconfortavel.
+        // Botao esquerdo arrasta o grafo; o cursor sinaliza o estado (grab/grabbing).
+        (function enableDragPan() {
+            const wrapper = document.getElementById('mermaidWrapper');
+            if (!wrapper) return;
+
+            let dragging = false;
+            let startX = 0, startY = 0, startScrollLeft = 0, startScrollTop = 0;
+
+            wrapper.addEventListener('pointerdown', (e) => {
+                if (e.button !== 0) return;
+                dragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                startScrollLeft = wrapper.scrollLeft;
+                startScrollTop = wrapper.scrollTop;
+                wrapper.setPointerCapture(e.pointerId);
+                wrapper.style.cursor = 'grabbing';
+            });
+
+            wrapper.addEventListener('pointermove', (e) => {
+                if (!dragging) return;
+                e.preventDefault();
+                wrapper.scrollLeft = startScrollLeft - (e.clientX - startX);
+                wrapper.scrollTop = startScrollTop - (e.clientY - startY);
+            });
+
+            function endDrag(e) {
+                if (!dragging) return;
+                dragging = false;
+                try { wrapper.releasePointerCapture(e.pointerId); } catch (_) { /* ja liberado */ }
+                wrapper.style.cursor = 'grab';
+            }
+
+            wrapper.addEventListener('pointerup', endDrag);
+            wrapper.addEventListener('pointercancel', endDrag);
+            wrapper.style.cursor = 'grab';
+        })();
 
         if (typeof mermaid === 'undefined') {
             document.getElementById('mermaidContent').innerHTML =
