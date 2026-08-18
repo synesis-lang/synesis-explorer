@@ -579,7 +579,7 @@
     "ajv": "^8.20.0",
     "chai": "^4.3.0",
     "esbuild": "^0.28.2",
-    "eslint": "^8.0.0",
+    "eslint": "^10.8.1",
     "mocha": "^11.8.0",
     "vscode-oniguruma": "^2.0.1",
     "vscode-textmate": "^9.3.2"
