@@ -31,6 +31,14 @@ updates:
       # Migrar exige converter a suite, nao atualizar a dependencia.
       - dependency-name: "chai"
         update-types: ["version-update:semver-major"]
+      # eslint muda o formato de configuracao entre majors (o 9 abandonou
+      # .eslintrc e exigiu flat config, quebrando o CI). Migrar e' trabalho
+      # proprio, com verificacao de que o conjunto de warnings nao muda.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # @eslint/js acompanha o eslint: o par de versoes e' casado.
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

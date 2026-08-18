@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exige `^1.82.0`. O valor otimista permitia instalar a extensão em editores
   onde ela falharia em runtime, sem que o Marketplace barrasse.
 
+### Changed — ESLint 8 → 10 e migração para flat config
+
+- `.eslintrc.json` e `.eslintignore` foram **removidos**: o ESLint 9+ deixou de
+  lê-los, e era a causa do CI vermelho no PR #10. Substituídos por
+  `eslint.config.js`.
+- A migração **não afrouxa nada**: mesmos 3 warnings de `no-unused-vars`, nos
+  mesmos arquivos e linhas. A cobertura subiu de 51 para 53 arquivos —
+  `.vscode-test.mjs` e o próprio `eslint.config.js` passaram a ser analisados.
+- **`caughtErrors: "none"` fixado explicitamente.** O padrão mudou para `"all"`
+  no ESLint 9, o que transformaria em warning todo `catch (error)` que não usa
+  a variável — 4 casos legítimos neste repo, onde o bloco existe para engolir a
+  falha de propósito. Fixar mantém a política de lint idêntica à anterior.
+
 ### Changed — Dependências de desenvolvimento atualizadas
 
 - `@types/node` ^14 → ^26.2.0, `esbuild` ^0.20.2 → ^0.28.2,
@@ -22,8 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   abaixo dele; tipos acima do engine expõem APIs que o editor mínimo não
   garante — compila e quebra na máquina do usuário.
 - **Deliberadamente fora:** `vscode-languageclient` (10 exige VS Code ^1.91.0 —
-  decisão de produto), `chai` (5+ é ESM-only e 10 arquivos de teste usam
-  `require`) e `eslint` (9+ exige flat config, migração própria).
+  decisão de produto) e `chai` (5+ é ESM-only e 10 arquivos de teste usam
+  `require`).
 
 ### Changed — `dependabot.yml`: majors saem do grupo
 
@@ -36,6 +49,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   versionamento é 1.x (1.82 → 1.125 é *minor*), então ignorar só major não o
   alcançaria — como comprovou o PR #9, aberto minutos depois da primeira regra.
   Deve ser atualizado junto com `engines`, manualmente.
+- `eslint` e `@eslint/js` também ignoram majors: o formato de configuração muda
+  entre versões maiores, e migrar exige verificar que o conjunto de warnings não
+  se altera.
 - Mesmo padrão adotado no `synesis-lsp` para `pygls`/`lsprotocol`, onde a
   regressão reincidiu duas vezes.
 

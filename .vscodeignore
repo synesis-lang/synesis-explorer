@@ -12,8 +12,7 @@ Planning/**
 .claude/**
 .gitignore
 .gitattributes
-.eslintrc.json
-.eslintignore
+eslint.config.js
 .pre-commit-config.yaml
 *.vsix
 
