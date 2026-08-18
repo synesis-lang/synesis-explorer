@@ -5,6 +5,124 @@ All notable changes to the Synesis extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.12.0] - 2026-08-18
+
+> As correções abaixo marcadas com **(LSP)** requerem `synesis-lsp` **0.23.0+**;
+> a extensão sozinha não as entrega.
+
+### Added — Seção **Source** no abstract viewer
+
+- Os campos que o pesquisador escreve no bloco `SOURCE` do `.syn`
+  (`description`, `method`, `epistemic_model`, …) passam a aparecer numa seção
+  própria, entre os dados bibliográficos e o abstract, na ordem de declaração do
+  template. Antes o cabeçalho vinha só do `.bib` e esses campos não tinham como
+  chegar à tela. Requer `synesis-lsp` 0.23.0+ (ver detalhe em *Fixed*, abaixo).
+
+### Fixed — Diagnósticos e contagem de uso (LSP)
+
+- **`ITEM` com referência inexistente não acusava erro** — escrever
+  `ITEM @barbieri20101` não produzia marca alguma no editor, embora
+  `synesis compile` apontasse o erro. Também afetava `SOURCE` sem nenhum `ITEM`
+  e conceito de ontologia declarado duas vezes. Requer `synesis-lsp` atualizado.
+
+- **Hover dizia "Usado em 0 itens" para conceito usado em CHAIN** — o mesmo
+  valia para a contagem no autocomplete, para o *Find All References* (que
+  devolvia nada) e para o Graph View (que omitia o conceito). O painel **Codes**
+  era o único lugar que já contava certo. Requer `synesis-lsp` atualizado.
+
+### Fixed — Navegação levava ao bloco errado
+
+- **Clicar numa referência no sidebar caía no meio de um ITEM anterior**
+  (`src/explorers/reference/referenceExplorer.js`)
+  - O cache do explorer resumia o estado em três números — quantidade de
+    referências, nome da primeira e total de ocorrências. **Nenhuma linha entrava
+    nesse resumo.** Editar o arquivo sem alterar contagens (inserir comentários,
+    linhas em branco, reescrever a prosa de um `note`) produzia o mesmo resumo, o
+    refresh era abortado e a árvore continuava servindo as linhas antigas. O
+    clique navegava para uma posição já deslocada, tipicamente no meio do bloco
+    anterior, com erro cumulativo a cada edição.
+  - Explicava o caráter intermitente do defeito: adicionar ou remover um bloco
+    mudava as contagens, o refresh acontecia e o problema se corrigia sozinho,
+    apagando o rastro.
+  - A localização (`file:line`) agora entra no cache, via
+    `src/explorers/reference/referenceHash.js`. O formato segue o do
+    `ontologyExplorer`, que já era imune ao defeito.
+
+- **Um comentário acima de um bloco pertencia ao bloco anterior**
+  (`src/viewers/abstractViewer.js`, `src/viewers/bibrefResolver.js`)
+  - Requer `synesis-lsp` com a correção correspondente em `blocks.py`.
+  - Com o cursor sobre `# Estudo de Silva 2020` escrito acima de `SOURCE
+    @silva2020`, o *Show Abstract* abria o abstract da fonte **anterior**. Com o
+    cursor num cabeçalho comentado no topo do arquivo, respondia *"No reference
+    found"* — não havia bloco anterior a que se agarrar.
+  - Um comentário escrito acima de um bloco o rotula; é assim que se lê na tela.
+    Agora, quando tudo entre o cursor e o próximo bloco é comentário ou linha em
+    branco, a referência resolvida é a do bloco **seguinte**. Havendo qualquer
+    conteúdo real nesse intervalo, o comportamento anterior é mantido.
+  - O caminho de fallback (parser local, usado quando o LSP não responde) passou
+    a usar o mesmo resolvedor: antes tinha regra própria e podia divergir do LSP
+    para o mesmo cursor.
+
+### Fixed — `abstractViewer`
+
+- **Campos do bloco SOURCE não apareciam em lugar nenhum**
+  - O cabeçalho do viewer era montado inteiramente a partir do `.bib`. Os campos
+    que o pesquisador escreve no bloco SOURCE do `.syn` (`description`, `method`,
+    `epistemic_model`, …) não tinham por onde chegar à tela — sem erro, sem
+    aviso. A conclusão natural era que o campo "não funciona".
+  - Requer `synesis-lsp` com a chave `source` em `getExcerpts`. Com um LSP
+    anterior, a seção simplesmente não é exibida.
+  - Nova seção **Source**, entre os dados bibliográficos e o abstract, na ordem
+    de declaração do template.
+
+- **Campos de outros escopos poluíam a ordenação do card de ITEM**
+  (`src/viewers/itemCardBuilder.js`)
+  - O template declara três escopos (SOURCE, ITEM, ONTOLOGY) e todos entravam na
+    ordenação dos campos do card, para depois serem descartados por não terem
+    valor. Agora só os de escopo ITEM são considerados; campo sem escopo
+    declarado continua tratado como ITEM.
+
+- **Trechos não eram localizados no abstract "sem motivo aparente"**
+  (`src/utils/fuzzyMatcher.js`)
+  - Duas causas independentes, ambas invisíveis para quem usa:
+    1. **Formas Unicode divergentes.** `ç` e `ã` podem ser um caractere ou dois,
+       conforme a origem do texto. O abstract vem do `.bib` (com frequência
+       extraído de PDF) e o excerpt é digitado — as duas grafias nunca casavam.
+       Crítico em português.
+    2. **Hifenização de PDF.** O abstract traz `socio-\neconomic`; o excerpt
+       digitado é `socioeconomic`.
+  - **Mudança de comportamento:** a busca passou a ser insensível a acentos —
+    `critico` localiza `crítico`. Para localizar um trecho citado isso é
+    desejável, já que o acento costuma ser o que se perde na extração do PDF. O
+    trecho destacado preserva os acentos do texto original.
+
+- **Destaques desapareciam do abstract e o rodapé mentia**
+  - Quando dois ITEMs codificavam trechos que se cruzam — situação normal em
+    codificação qualitativa — o segundo destaque era descartado em silêncio. O
+    card continuava na legenda, com sua cor, prometendo uma marcação que não
+    existia no texto.
+  - O rodapé contava cards *com excerpt*, não destaques efetivamente desenhados:
+    dizia "3 excerpts in abstract" havendo 2.
+  - Agora o contador reflete o que está na tela, e o card não destacado exibe o
+    motivo: `overlaps another excerpt` ou `not found in abstract`.
+
+- **Fallback local nunca encontrava os ITEMs** (defeito latente)
+  - Quando o LSP respondia `getBlocks` mas falhava em `getExcerpts`, o caminho de
+    fallback comparava a referência com `@` contra a referência sem `@` — a
+    comparação era sempre falsa e o viewer abria com *"No ITEM blocks found for
+    this reference"*.
+
+### Fixed — `synesis-coder`
+
+- **O ITEM gerado era inserido depois do comentário da fonte seguinte**
+  (`src/services/coderService.js`, via correção de ranges no LSP)
+  - O ponto de inserção derivava do fim do bloco, que era estimado até o início
+    do bloco seguinte — englobando comentários e linhas em branco. O texto novo
+    caía no território visual da próxima fonte. Agora é inserido logo após o
+    `END` do bloco.
+
 ## [0.11.0] - 2026-08-10
 
 ### Fixed — `abstractViewer`

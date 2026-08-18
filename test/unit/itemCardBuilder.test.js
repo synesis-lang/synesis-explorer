@@ -1,5 +1,5 @@
 const assert = require('assert');
-const { buildItemCards, buildDisplayPlan, orderedFieldNames } = require('../../src/viewers/itemCardBuilder');
+const { buildItemCards, buildDisplayPlan, orderedFieldNames, isItemScope } = require('../../src/viewers/itemCardBuilder');
 
 // Template no formato do registry (templateManager.buildFieldRegistry)
 const REGISTRY = {
@@ -227,6 +227,83 @@ describe('itemCardBuilder', () => {
         it('orderedFieldNames não duplica campos presentes nos dois lados', () => {
             const names = orderedFieldNames({ zone: {} }, { zone: 'x' });
             assert.deepStrictEqual(names, ['zone']);
+        });
+    });
+
+    /**
+     * Escopo do template (F4.a).
+     *
+     * O template declara SOURCE, ITEM e ONTOLOGY. Só os de ITEM têm valor num
+     * card de ITEM — os demais entravam na ordenação e eram descartados em
+     * silêncio. O registry real do face85 tem os três escopos.
+     */
+    describe('filtro de escopo', () => {
+        const REGISTRY_3_ESCOPOS = {
+            description: { type: 'TEXT', scope: 'SOURCE' },
+            bible_verses_used: { type: 'TEXT', scope: 'SOURCE' },
+            citation: { type: 'QUOTATION', scope: 'ITEM' },
+            note: { type: 'MEMO', scope: 'ITEM' },
+            code: { type: 'CODE', scope: 'ITEM' },
+            definition: { type: 'TEXT', scope: 'ONTOLOGY' },
+            group: { type: 'ORDERED', scope: 'ONTOLOGY' }
+        };
+
+        it('exclui campos de escopo SOURCE da ordenação', () => {
+            const names = orderedFieldNames(REGISTRY_3_ESCOPOS, {});
+
+            assert.ok(!names.includes('description'));
+            assert.ok(!names.includes('bible_verses_used'));
+        });
+
+        it('exclui campos de escopo ONTOLOGY da ordenação', () => {
+            // Blocklist de 'SOURCE' deixaria estes passarem.
+            const names = orderedFieldNames(REGISTRY_3_ESCOPOS, {});
+
+            assert.ok(!names.includes('definition'));
+            assert.ok(!names.includes('group'));
+        });
+
+        it('mantém apenas os campos de escopo ITEM', () => {
+            const names = orderedFieldNames(REGISTRY_3_ESCOPOS, {});
+
+            assert.deepStrictEqual(names, ['citation', 'note', 'code']);
+        });
+
+        it('não exibe campo de escopo SOURCE mesmo quando presente no item', () => {
+            // Sem a checagem no 2º laço, o valor readmitiria o campo filtrado.
+            const { cards } = buildItemCards([
+                item({ citation: 'trecho', description: 'veio junto por engano' })
+            ], REGISTRY_3_ESCOPOS);
+
+            assert.ok(!cards[0].fields.some(f => f.name.toLowerCase() === 'description'));
+        });
+
+        it('trata campo sem scope declarado como ITEM', () => {
+            const names = orderedFieldNames({ zone: { type: 'ENUMERATED' } }, {});
+
+            assert.deepStrictEqual(names, ['zone']);
+        });
+
+        it('aceita scope em caixa baixa', () => {
+            const names = orderedFieldNames({
+                a: { type: 'TEXT', scope: 'item' },
+                b: { type: 'TEXT', scope: 'source' }
+            }, {});
+
+            assert.deepStrictEqual(names, ['a']);
+        });
+
+        it('mantém campos do item ausentes do registry', () => {
+            // Não-regressão: template desatualizado não pode sumir com o dado.
+            const names = orderedFieldNames(REGISTRY_3_ESCOPOS, { campo_novo: 'x' });
+
+            assert.ok(names.includes('campo_novo'));
+        });
+
+        it('isItemScope aceita def nulo', () => {
+            assert.strictEqual(isItemScope(null), true);
+            assert.strictEqual(isItemScope(undefined), true);
+            assert.strictEqual(isItemScope({}), true);
         });
     });
 });

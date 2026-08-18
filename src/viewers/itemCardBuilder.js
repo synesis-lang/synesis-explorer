@@ -104,15 +104,38 @@ function fieldLabel(name, def) {
 }
 
 /**
+ * Um campo pertence ao card de ITEM?
+ *
+ * O template declara três escopos — SOURCE, ITEM e ONTOLOGY — e só os de ITEM
+ * têm valor num card de ITEM. Os demais entravam na ordenação, não encontravam
+ * valor em `item.fields` e eram descartados em silêncio: ruído sem efeito
+ * visível, mas que mascarava a ausência dos campos de SOURCE na tela.
+ *
+ * Allowlist, não blocklist: filtrar apenas `scope === 'SOURCE'` deixaria passar
+ * ONTOLOGY. Campo sem `scope` declarado conta como ITEM — é o default do
+ * templateParser e o comportamento anterior.
+ */
+function isItemScope(def) {
+    const scope = def && def.scope;
+    if (!scope) {
+        return true;
+    }
+    return String(scope).toUpperCase() === 'ITEM';
+}
+
+/**
  * Ordem de exibição: a do template, não a do dict do item.
  * Mantém o card como espelho do template entre ITEMs e entre execuções.
  */
 function orderedFieldNames(registry, itemFields) {
-    const templateOrder = Object.keys(registry || {});
+    const source = registry || {};
     const seen = new Set();
     const ordered = [];
 
-    for (const name of templateOrder) {
+    for (const name of Object.keys(source)) {
+        if (!isItemScope(source[name])) {
+            continue;
+        }
         const key = name.toLowerCase();
         if (!seen.has(key)) {
             seen.add(key);
@@ -122,9 +145,20 @@ function orderedFieldNames(registry, itemFields) {
 
     // Campos presentes no item mas ausentes do registry (ex.: template
     // desatualizado) entram no fim, em vez de sumirem.
+    //
+    // Um campo declarado no registry com escopo não-ITEM foi pulado acima e não
+    // pode voltar por aqui — sem esta checagem, bastaria o valor existir em
+    // `item.fields` para o filtro de escopo ser contornado.
+    const declaredNonItem = new Set(
+        Object.keys(source)
+            .filter(name => !isItemScope(source[name]))
+            .map(name => name.toLowerCase())
+    );
+
     for (const key of Object.keys(itemFields || {})) {
-        if (!seen.has(key)) {
-            seen.add(key);
+        const normalized = key.toLowerCase();
+        if (!seen.has(normalized) && !declaredNonItem.has(normalized)) {
+            seen.add(normalized);
             ordered.push(key);
         }
     }
@@ -261,5 +295,6 @@ module.exports = {
     normalizeText,
     toValueList,
     fieldsOfType,
-    orderedFieldNames
+    orderedFieldNames,
+    isItemScope
 };

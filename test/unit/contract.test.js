@@ -49,7 +49,7 @@ function validatorFor(endpoint) {
     return ajv.compile(schema);
 }
 
-const ENDPOINTS = ['getReferences', 'getCodes', 'getRelations', 'getOntologyAnnotations'];
+const ENDPOINTS = ['getReferences', 'getCodes', 'getRelations', 'getOntologyAnnotations', 'getExcerpts'];
 
 describe('contract: schemas compile', () => {
     ENDPOINTS.forEach(endpoint => {

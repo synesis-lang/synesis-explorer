@@ -255,6 +255,28 @@ class LspDataProvider {
         return result.items || [];
     }
 
+    /**
+     * Items + campos do bloco SOURCE numa única chamada.
+     *
+     * `getExcerpts` continua devolvendo só o array — sua forma é usada como
+     * sinal de "LSP respondeu" em _extractExcerpts, e mudá-la exigiria tocar
+     * esse contrato. Este método serve quem também precisa do SOURCE, sem
+     * repetir a requisição.
+     *
+     * `source` é chave recente do payload: um LSP anterior devolve undefined, e
+     * o `|| {}` traduz isso para "sem campos de SOURCE".
+     */
+    async getExcerptsWithSource(workspaceRoot, bibref) {
+        const result = await this._sendRequestWithFallback(
+            'synesis/getExcerpts',
+            { workspaceRoot, bibref }
+        );
+        if (!result || !result.success) {
+            return null;
+        }
+        return { items: result.items || [], source: result.source || {} };
+    }
+
     async getBlocks(workspaceRoot, file) {
         const result = await this._sendRequestWithFallback(
             'synesis/getBlocks',
@@ -392,6 +414,10 @@ class DataService {
         return this._callLsp('getExcerpts', bibref);
     }
 
+    async getExcerptsWithSource(bibref) {
+        return this._callLsp('getExcerptsWithSource', bibref);
+    }
+
     async getBlocks(file) {
         return this._callLsp('getBlocks', file);
     }
@@ -461,7 +487,7 @@ class DataService {
         }
         const lspMethod = this._resolveLspMethodName(method);
         const message = `Synesis LSP does not support "${lspMethod}". ` +
-            'Update synesis-lsp to v0.13.0+ or adjust synesisExplorer.lsp.pythonPath.';
+            'Update synesis-lsp to v0.23.0+ or adjust synesisExplorer.lsp.pythonPath.';
 
         vscode.window.showWarningMessage(message);
         console.warn(`DataService: LSP method not found (${lspMethod}):`, error.message);
@@ -484,6 +510,7 @@ class DataService {
             case 'getOntologyAnnotations':
                 return 'synesis/getOntologyAnnotations';
             case 'getExcerpts':
+            case 'getExcerptsWithSource':
                 return 'synesis/getExcerpts';
             case 'getBlocks':
                 return 'synesis/getBlocks';
@@ -507,6 +534,7 @@ class DataService {
             case 'getRelationGraphForFile':
                 return null;
             case 'getExcerpts':
+            case 'getExcerptsWithSource':
                 return null;
             case 'getBlocks':
                 return null;

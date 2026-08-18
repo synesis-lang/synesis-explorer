@@ -19,8 +19,8 @@
  *     // TreeView mostra refs com ocorrências
  */
 
-const path = require('path');
 const vscode = require('vscode');
+const { hashReferences } = require('./referenceHash');
 
 class ReferenceExplorer {
     constructor(dataService) {
@@ -36,16 +36,13 @@ class ReferenceExplorer {
     }
 
     /**
-     * Simple hash function for cache comparison
+     * Hash do payload para comparação de cache.
+     *
+     * Inclui file:line de cada ocorrência — ver referenceHash.js para o motivo
+     * (resumir por contagem servia linhas obsoletas ao clique).
      */
     _hashData(refs) {
-        if (!refs || refs.length === 0) {
-            return 'empty';
-        }
-        const count = refs.length;
-        const first = refs[0]?.bibref || '';
-        const occCount = refs.reduce((sum, r) => sum + (r.occurrences?.length || 0), 0);
-        return `${count}:${first}:${occCount}`;
+        return hashReferences(refs);
     }
 
     /**

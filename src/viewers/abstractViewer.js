@@ -20,7 +20,8 @@ const SynesisParser = require('../parsers/synesisParser');
 const projectLoader = require('../core/projectLoader');
 const bibtexParser = require('../parsers/bibtexParser');
 const fuzzyMatcher = require('../utils/fuzzyMatcher');
-const { buildItemCards } = require('./itemCardBuilder');
+const { buildItemCards, toValueList } = require('./itemCardBuilder');
+const { resolveBibref } = require('./bibrefResolver');
 
 class AbstractViewer {
     constructor(workspaceScanner, templateManager, dataService) {
@@ -71,7 +72,9 @@ class AbstractViewer {
         const extracted = await this._extractExcerpts(bibref, projectUri);
         const cards = extracted.cards;
         const display = extracted.display;
-        const highlighted = abstract ? this.highlightExcerpts(abstract, cards) : '';
+        const highlight = abstract
+            ? this.highlightExcerpts(abstract, cards)
+            : { html: '', highlighted: new Set(), skipped: [] };
         const hasAbstract = Boolean(abstract);
         if (!hasAbstract) {
             vscode.window.showWarningMessage(`No abstract found for ${bibref}. Showing bibliographic info only.`);
@@ -84,28 +87,53 @@ class AbstractViewer {
             { enableScripts: false }
         );
 
-        panel.webview.html = this.getHtmlContent(bibref, entry, highlighted, cards, hasAbstract, display);
+        panel.webview.html = this.getHtmlContent(
+            bibref, entry, highlight.html, cards, hasAbstract, display, highlight
+        );
     }
 
+    /**
+     * Destaca no abstract os trechos citados pelos ITEMs.
+     *
+     * Devolve também QUAIS cards foram efetivamente destacados. Antes, um card
+     * cujo destaque não fosse renderizado desaparecia em silêncio do abstract —
+     * ele continuava na legenda, com sua cor, mas sem marcação correspondente no
+     * texto. E o rodapé contava cards com excerpt, não destaques desenhados,
+     * afirmando "3 excerpts in abstract" quando havia 2.
+     *
+     * Dois motivos para um card não ser destacado:
+     *   - o trecho não foi localizado no abstract (`notFound`);
+     *   - o trecho se sobrepõe a um destaque anterior (`overlapped`). Excerpts
+     *     que se cruzam são normais em codificação qualitativa: dois ITEMs podem
+     *     codificar trechos que compartilham palavras.
+     *
+     * @returns {{html: string, highlighted: Set<number>, skipped: Array<{index: number, reason: string}>}}
+     */
     highlightExcerpts(abstract, cards) {
+        const highlighted = new Set();
+        const skipped = [];
+
         if (!abstract) {
-            return '';
+            return { html: '', highlighted, skipped };
         }
 
+        const list = Array.isArray(cards) ? cards : [];
         const matches = [];
 
-        for (let index = 0; index < cards.length; index += 1) {
-            const excerpt = cards[index].excerpt;
+        for (let index = 0; index < list.length; index += 1) {
+            const excerpt = list[index] && list[index].excerpt;
             if (!excerpt || !excerpt.value) {
                 continue;
             }
 
             const match = fuzzyMatcher.findExcerpt(abstract, excerpt.value);
             if (!match) {
+                skipped.push({ index, reason: 'notFound' });
                 continue;
             }
 
             matches.push({
+                index,
                 start: match.start,
                 end: match.end,
                 color: this.colors[index % this.colors.length]
@@ -113,28 +141,33 @@ class AbstractViewer {
         }
 
         if (matches.length === 0) {
-            return escapeHtml(abstract);
+            return { html: escapeHtml(abstract), highlighted, skipped };
         }
 
-        matches.sort((a, b) => a.start - b.start);
+        // Ordem estável: por início e, em empate, pelo trecho mais longo — assim
+        // o destaque mais informativo vence a sobreposição, em vez de depender
+        // da ordem de declaração dos ITEMs.
+        matches.sort((a, b) => (a.start - b.start) || (b.end - a.end));
 
-        let result = '';
+        let html = '';
         let cursor = 0;
 
         for (const match of matches) {
             if (match.start < cursor) {
+                skipped.push({ index: match.index, reason: 'overlapped' });
                 continue;
             }
 
-            result += escapeHtml(abstract.slice(cursor, match.start));
-            result += `<mark style="background-color: ${match.color};">`;
-            result += escapeHtml(abstract.slice(match.start, match.end));
-            result += '</mark>';
+            html += escapeHtml(abstract.slice(cursor, match.start));
+            html += `<mark style="background-color: ${match.color};">`;
+            html += escapeHtml(abstract.slice(match.start, match.end));
+            html += '</mark>';
             cursor = match.end;
+            highlighted.add(match.index);
         }
 
-        result += escapeHtml(abstract.slice(cursor));
-        return result;
+        html += escapeHtml(abstract.slice(cursor));
+        return { html, highlighted, skipped };
     }
 
     /**
@@ -150,9 +183,13 @@ class AbstractViewer {
         // Try LSP first — eliminates all local I/O and regex parsing
         if (this.dataService) {
             try {
-                const lspItems = await this.dataService.getExcerpts(bibref);
-                if (lspItems && lspItems.length > 0) {
-                    return this._buildResult(lspItems.map(normalizeLspItem), registry);
+                const payload = await this._fetchFromLsp(bibref);
+                if (payload && payload.items.length > 0) {
+                    return this._buildResult(
+                        payload.items.map(normalizeLspItem),
+                        registry,
+                        payload.source
+                    );
                 }
             } catch (err) {
                 console.warn('AbstractViewer._extractExcerpts: LSP getExcerpts failed, falling back to local:', err.message);
@@ -161,14 +198,38 @@ class AbstractViewer {
 
         // Fallback: local I/O + regex parsing (kept during transition)
         const localItems = await this._collectLocalItems(bibref, projectUri);
-        return this._buildResult(localItems, registry);
+        return this._buildResult(localItems, registry, null);
     }
 
-    _buildResult(normalizedItems, registry) {
+    /**
+     * Busca items e campos do SOURCE numa chamada só.
+     *
+     * Cai para `getExcerpts` quando o dataService é anterior a
+     * `getExcerptsWithSource` — nesse caso não há campos de SOURCE a exibir, e a
+     * seção simplesmente não é renderizada.
+     */
+    async _fetchFromLsp(bibref) {
+        if (typeof this.dataService.getExcerptsWithSource === 'function') {
+            const payload = await this.dataService.getExcerptsWithSource(bibref);
+            if (payload && Array.isArray(payload.items)) {
+                return { items: payload.items, source: payload.source || null };
+            }
+            return null;
+        }
+
+        const items = await this.dataService.getExcerpts(bibref);
+        return items ? { items, source: null } : null;
+    }
+
+    _buildResult(normalizedItems, registry, sourceFields) {
         const { cards, display } = buildItemCards(normalizedItems, registry);
         return {
             cards,
-            display: { ...display, relationSet: buildRelationSet(registry) }
+            display: {
+                ...display,
+                relationSet: buildRelationSet(registry),
+                sourceFields: buildSourceFields(sourceFields, registry)
+            }
         };
     }
 
@@ -178,13 +239,16 @@ class AbstractViewer {
     async _collectLocalItems(bibref, projectUri) {
         const items = [];
         const synFiles = await this.scanner.findSynFiles(projectUri);
+        // O parser local mantém o '@'; o getBlocks (fonte do bibref) o remove.
+        // Comparar cru descartava TODOS os items — o fallback nunca achava nada.
+        const target = normalizeBibref(bibref);
 
         for (const fileUri of synFiles) {
             const content = await vscode.workspace.fs.readFile(fileUri);
             const parsed = this.parser.parseItems(content.toString(), fileUri.fsPath);
 
             for (const item of parsed) {
-                if (item.bibref !== bibref) {
+                if (normalizeBibref(item.bibref) !== target) {
                     continue;
                 }
                 items.push(normalizeLocalItem(item, fileUri.fsPath));
@@ -194,8 +258,12 @@ class AbstractViewer {
         return items;
     }
 
-    getHtmlContent(bibref, entry, abstractHtml, cards, hasAbstract, display) {
+    getHtmlContent(bibref, entry, abstractHtml, cards, hasAbstract, display, highlight) {
         const bibInfo = buildBibInfo(entry);
+        const marked = (highlight && highlight.highlighted) || new Set();
+        const skipReason = new Map(
+            ((highlight && highlight.skipped) || []).map(s => [s.index, s.reason])
+        );
 
         // Um card por bloco ITEM. A cor indexa o ITEM, mantendo a correspondência
         // com o destaque no abstract.
@@ -203,6 +271,16 @@ class AbstractViewer {
             const color = this.colors[index % this.colors.length];
             const excerptHtml = card.excerpt
                 ? `<div class="card-excerpt">${escapeHtml(card.excerpt.value)}</div>`
+                : '';
+
+            // Um card com excerpt que não aparece destacado precisa dizer por
+            // quê: sem isso, a cor da legenda promete uma marcação que não existe.
+            const badgeHtml = (hasAbstract && card.excerpt && card.excerpt.value && !marked.has(index))
+                ? `<span class="card-badge">${escapeHtml(
+                    skipReason.get(index) === 'overlapped'
+                        ? 'overlaps another excerpt'
+                        : 'not found in abstract'
+                )}</span>`
                 : '';
 
             const chainsHtml = card.chains.length > 0
@@ -232,6 +310,7 @@ class AbstractViewer {
           <div class="card-header">
             <span class="legend-color" style="background-color: ${color};"></span>
             <span class="card-title">ITEM ${index + 1}</span>
+            ${badgeHtml}
             ${card.line ? `<span class="card-location">line ${card.line}</span>` : ''}
           </div>
           ${excerptHtml}
@@ -242,7 +321,9 @@ class AbstractViewer {
       `;
         }).join('');
 
-        const highlightedCount = cards.filter(card => card.excerpt && card.excerpt.value).length;
+        // Conta destaques efetivamente desenhados, não cards com excerpt: o
+        // número no rodapé tem de bater com o que se vê no abstract.
+        const highlightedCount = marked.size;
         const statsParts = [`<strong>${cards.length}</strong> ITEM${cards.length === 1 ? '' : 's'}`];
         if (display.chainCount > 0) {
             statsParts.push(`<strong>${display.chainCount}</strong> chain${display.chainCount === 1 ? '' : 's'}`);
@@ -256,6 +337,19 @@ class AbstractViewer {
         <div class="abstract-container">
           <div class="abstract-text">
             ${abstractHtml}
+          </div>
+        </div>
+        ` : '';
+
+        // Campos do bloco SOURCE (.syn). O header acima vem do BibTeX; esta
+        // seção é o que o pesquisador escreveu sobre a fonte. Omitida quando não
+        // há campos — inclusive com LSP anterior a esta feature.
+        const sourceFields = (display && display.sourceFields) || [];
+        const sourceSection = sourceFields.length > 0 ? `
+        <div class="source-container">
+          <h2>Source</h2>
+          <div class="card-fields">
+            ${sourceFields.map(field => renderField(field)).join('')}
           </div>
         </div>
         ` : '';
@@ -291,7 +385,7 @@ class AbstractViewer {
             color: var(--text);
           }
 
-          .header, .abstract-container, .legend, .stats {
+          .header, .abstract-container, .source-container, .legend, .stats {
             margin-bottom: 24px;
             padding: 28px 32px;
             border-radius: var(--radius);
@@ -431,11 +525,15 @@ class AbstractViewer {
             transform: translateY(-1px);
           }
 
-          .legend h2 {
+          .legend h2, .source-container h2 {
             font-size: 18px;
             font-weight: 700;
             margin-bottom: 20px;
             color: var(--text);
+          }
+
+          .source-container .card-fields {
+            margin-bottom: 0;
           }
 
           .legend-item {
@@ -587,6 +685,23 @@ class AbstractViewer {
             margin-left: auto;
           }
 
+          /* Card com excerpt que não aparece destacado no abstract. */
+          .card-badge {
+            font-size: 10.5px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            padding: 2px 8px;
+            border-radius: 10px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+          }
+
+          .card-badge + .card-location {
+            margin-left: auto;
+          }
+
           .card-excerpt {
             font-size: 15px;
             line-height: 1.65;
@@ -665,6 +780,7 @@ class AbstractViewer {
         <div class="header">
           ${bibInfoHtml}
         </div>
+        ${sourceSection}
         ${abstractSection}
         <div class="legend">
           <h2>Annotations</h2>
@@ -693,27 +809,98 @@ class AbstractViewer {
             }
         }
 
-        // Fallback: parser local (transitório — removido quando getBlocks estiver estável)
+        // Fallback: parser local (transitório — removido quando getBlocks estiver estável).
+        // Converte os blocos do parser local para o mesmo formato do getBlocks e
+        // usa o MESMO resolvedor: antes, este caminho tinha regra própria (só
+        // SOURCEs no lastBefore, sem tratamento de gap) e podia divergir do LSP
+        // para o mesmo cursor.
         const text = document.getText();
-        const items = this.parser.parseItems(text, file);
-        const item = items.find(block => offset >= block.startOffset && offset <= block.endOffset);
-        if (item) {
-            return item.bibref;
-        }
+        const lines = text.split(/\r?\n/);
+        const cursorLine = document.positionAt(offset).line;
 
-        const sources = this.parser.parseSourceBlocks(text, file);
-        let last = null;
-        for (const source of sources) {
-            if (source.startOffset <= offset) {
-                last = source.bibref;
-            }
-        }
-        return last;
+        const localBlocks = [
+            ...this.parser.parseSourceBlocks(text, file).map(b => toResolverBlock(b, 'SOURCE', document)),
+            ...this.parser.parseItems(text, file).map(b => toResolverBlock(b, 'ITEM', document))
+        ];
+
+        return resolveBibref(localBlocks, lines, cursorLine);
     }
 }
 
 function normalizeExcerpt(text) {
     return String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+}
+
+/** Bibref comparável entre os caminhos LSP (sem '@') e local (com '@'). */
+function normalizeBibref(value) {
+    return String(value == null ? '' : value).trim().replace(/^@/, '').toLowerCase();
+}
+
+/**
+ * Campos do bloco SOURCE prontos para render.
+ *
+ * Segue a ordem de declaração do template, como os campos do card de ITEM —
+ * a view é um espelho do template, não do dicionário que chegou.
+ *
+ * Devolve [] quando não há campos ou quando o LSP não envia `source` (versão
+ * anterior a esta feature): a seção some, em vez de aparecer vazia.
+ *
+ * @param {Object|null} sourceFields - dict {nome: valor} vindo do LSP
+ * @param {Object} registry - field registry do template
+ * @returns {Array<{name,label,description,type,values,isMultiple}>}
+ */
+function buildSourceFields(sourceFields, registry) {
+    if (!sourceFields || typeof sourceFields !== 'object') {
+        return [];
+    }
+
+    const byLowerKey = new Map();
+    for (const [key, value] of Object.entries(sourceFields)) {
+        byLowerKey.set(String(key).toLowerCase(), value);
+    }
+    if (byLowerKey.size === 0) {
+        return [];
+    }
+
+    const defs = registry || {};
+    const ordered = [];
+    const seen = new Set();
+
+    // Primeiro na ordem do template, depois o que sobrar do payload.
+    for (const name of Object.keys(defs)) {
+        const key = name.toLowerCase();
+        if (byLowerKey.has(key) && !seen.has(key)) {
+            seen.add(key);
+            ordered.push(name);
+        }
+    }
+    for (const key of byLowerKey.keys()) {
+        if (!seen.has(key)) {
+            seen.add(key);
+            ordered.push(key);
+        }
+    }
+
+    const fields = [];
+    for (const name of ordered) {
+        const key = name.toLowerCase();
+        const def = defs[name] || defs[key] || {};
+        const values = toValueList(byLowerKey.get(key));
+        if (values.length === 0) {
+            continue;
+        }
+
+        fields.push({
+            name,
+            label: def.description ? normalizeExcerpt(def.description) : name,
+            description: def.description ? normalizeExcerpt(def.description) : '',
+            type: def.type || '',
+            values,
+            isMultiple: values.length > 1
+        });
+    }
+
+    return fields;
 }
 
 /**
@@ -975,8 +1162,33 @@ function escapeHtml(text) {
 }
 
 /**
+ * Converte um bloco do parser local (offsets) no formato do getBlocks (linhas),
+ * para que os dois caminhos usem o mesmo resolvedor.
+ *
+ * O parser local mantém o '@' no bibref; o getBlocks não. Normaliza aqui para
+ * que o valor devolvido não dependa de qual caminho respondeu.
+ *
+ * @param {{bibref: string, startOffset: number, endOffset: number}} block
+ * @param {'SOURCE'|'ITEM'} kind
+ * @param {vscode.TextDocument} document
+ */
+function toResolverBlock(block, kind, document) {
+    return {
+        kind,
+        bibref: String(block.bibref || '').replace(/^@/, ''),
+        range: {
+            start: { line: document.positionAt(block.startOffset).line, character: 0 },
+            end: { line: document.positionAt(block.endOffset).line, character: 0 }
+        }
+    };
+}
+
+/**
  * Resolve bibref a partir de blocos LSP e posição do cursor.
- * Espelha a lógica de coderService._detectBibref mas sobre ranges LSP.
+ *
+ * Casca fina: converte a posição para linha e delega a `resolveBibref`, que
+ * opera sobre linhas puras e é testável sem `vscode`. A regra do gap de
+ * comentários está documentada em bibrefResolver.js.
  *
  * @param {Array<{kind,bibref,range}>} blocks
  * @param {vscode.TextDocument} document
@@ -984,26 +1196,9 @@ function escapeHtml(text) {
  * @returns {string|null}
  */
 function _bibrefFromBlocks(blocks, document, cursorOffset) {
-    let lastBefore = null;
-
-    for (const block of blocks) {
-        const startOffset = document.offsetAt(
-            new vscode.Position(block.range.start.line, block.range.start.character)
-        );
-        const endOffset = document.offsetAt(
-            new vscode.Position(block.range.end.line, block.range.end.character)
-        );
-
-        if (cursorOffset >= startOffset && cursorOffset <= endOffset) {
-            return block.bibref || null;
-        }
-
-        if (startOffset <= cursorOffset) {
-            lastBefore = block.bibref || null;
-        }
-    }
-
-    return lastBefore;
+    const cursorLine = document.positionAt(cursorOffset).line;
+    const lines = document.getText().split(/\r?\n/);
+    return resolveBibref(blocks, lines, cursorLine);
 }
 
 module.exports = AbstractViewer;
@@ -1013,3 +1208,4 @@ module.exports = AbstractViewer;
 module.exports.buildRelationSet = buildRelationSet;
 module.exports.isRelationToken = isRelationToken;
 module.exports.formatChain = formatChain;
+module.exports.buildSourceFields = buildSourceFields;

@@ -13,11 +13,30 @@
 const Module = require('module');
 const path = require('path');
 
-// Shape mínimo que dataService.js usa
+// Shape mínimo que dataService.js usa.
+// Position/Range/Selection foram acrescentados para coderService.js, que
+// converte ranges LSP em offsets do documento.
+class Position {
+    constructor(line, character) {
+        this.line = line;
+        this.character = character;
+    }
+}
+
+class Range {
+    constructor(start, end) {
+        this.start = start;
+        this.end = end;
+    }
+}
+
 const stub = {
     Uri: {
         parse: (uri) => ({ fsPath: uri.replace(/^file:\/\//, '') })
     },
+    Position,
+    Range,
+    Selection: class Selection extends Range {},
     window: {
         activeTextEditor: null,
         showWarningMessage: () => {}
