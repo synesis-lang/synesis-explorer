@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `@types/node` ^14 → ^26.2.0, `esbuild` ^0.20.2 → ^0.28.2,
   `mocha` ^10 → ^11.8.0, `@vscode/test-cli` ^0.0.12 → ^0.0.15,
   `@vscode/test-electron` ^3.0.0 → ^3.1.0.
+- `@types/vscode` ^1.60.0 → `~1.82.0`, **casando com o `engines`**. Estava
+  abaixo dele; tipos acima do engine expõem APIs que o editor mínimo não
+  garante — compila e quebra na máquina do usuário.
 - **Deliberadamente fora:** `vscode-languageclient` (10 exige VS Code ^1.91.0 —
   decisão de produto), `chai` (5+ é ESM-only e 10 arquivos de teste usam
   `require`) e `eslint` (9+ exige flat config, migração própria).
@@ -28,9 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   em PR individual. O PR #8 juntou 9 pacotes com **6 majors** — incluindo
   `vscode-languageclient` e `chai` — num diff de 2 mil linhas, impossível de
   revisar ou reverter em partes.
-- `vscode-languageclient`, `@types/vscode` e `chai` passam a ignorar majors,
-  com o motivo registrado no arquivo. Mesmo padrão adotado no `synesis-lsp`
-  para `pygls`/`lsprotocol`, onde a regressão reincidiu duas vezes.
+- `vscode-languageclient` e `chai` passam a ignorar majors, com o motivo
+  registrado no arquivo. `@types/vscode` é ignorado **por completo**: seu
+  versionamento é 1.x (1.82 → 1.125 é *minor*), então ignorar só major não o
+  alcançaria — como comprovou o PR #9, aberto minutos depois da primeira regra.
+  Deve ser atualizado junto com `engines`, manualmente.
+- Mesmo padrão adotado no `synesis-lsp` para `pygls`/`lsprotocol`, onde a
+  regressão reincidiu duas vezes.
 
 ## [0.12.0] - 2026-08-18
 

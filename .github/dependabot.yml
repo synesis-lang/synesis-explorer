@@ -21,9 +21,12 @@ updates:
       # (abandonar versoes antigas do editor), nunca bump automatico.
       - dependency-name: "vscode-languageclient"
         update-types: ["version-update:semver-major"]
-      # @types/vscode acompanha o `engines` pelo mesmo motivo.
+      # @types/vscode deve casar com `engines.vscode`, nunca ficar acima: tipos
+      # mais novos expoem APIs que o engine declarado nao garante, e o codigo
+      # compila mas quebra no editor do usuario. O versionamento e' 1.x (1.82,
+      # 1.125...), entao um bump aqui e' MINOR — ignorar so' major nao bastaria.
+      # Atualizar junto com `engines`, manualmente.
       - dependency-name: "@types/vscode"
-        update-types: ["version-update:semver-major"]
       # chai 5+ e ESM-only; os testes usam `require('chai')` em 10 arquivos.
       # Migrar exige converter a suite, nao atualizar a dependencia.
       - dependency-name: "chai"
