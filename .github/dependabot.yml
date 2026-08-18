@@ -6,8 +6,28 @@ updates:
       interval: "weekly"
     open-pull-requests-limit: 5
     groups:
+      # Só minor/patch entram agrupados. Majors ficam em PR individual: o PR #8
+      # juntou 9 pacotes com 6 majors — entre eles vscode-languageclient e chai,
+      # que quebram runtime e testes — num diff de 2 mil linhas impossivel de
+      # revisar ou reverter em partes.
       npm-dependencies:
         patterns: ["*"]
+        update-types: ["minor", "patch"]
+    ignore:
+      # vscode-languageclient e acoplado ao `engines.vscode` da extensao:
+      # a v9 exige VS Code ^1.82.0 e a v10 exige ^1.91.0. Subir de major eleva
+      # o VS Code minimo real sem que o manifesto diga isso, e a extensao
+      # instala e falha em runtime para quem esta abaixo. E decisao de produto
+      # (abandonar versoes antigas do editor), nunca bump automatico.
+      - dependency-name: "vscode-languageclient"
+        update-types: ["version-update:semver-major"]
+      # @types/vscode acompanha o `engines` pelo mesmo motivo.
+      - dependency-name: "@types/vscode"
+        update-types: ["version-update:semver-major"]
+      # chai 5+ e ESM-only; os testes usam `require('chai')` em 10 arquivos.
+      # Migrar exige converter a suite, nao atualizar a dependencia.
+      - dependency-name: "chai"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"

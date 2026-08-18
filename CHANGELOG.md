@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed — `engines.vscode` corrigido para `^1.82.0`
+
+- O manifesto declarava `^1.60.0`, mas `vscode-languageclient@9` — já em uso —
+  exige `^1.82.0`. O valor otimista permitia instalar a extensão em editores
+  onde ela falharia em runtime, sem que o Marketplace barrasse.
+
+### Changed — Dependências de desenvolvimento atualizadas
+
+- `@types/node` ^14 → ^26.2.0, `esbuild` ^0.20.2 → ^0.28.2,
+  `mocha` ^10 → ^11.8.0, `@vscode/test-cli` ^0.0.12 → ^0.0.15,
+  `@vscode/test-electron` ^3.0.0 → ^3.1.0.
+- **Deliberadamente fora:** `vscode-languageclient` (10 exige VS Code ^1.91.0 —
+  decisão de produto), `chai` (5+ é ESM-only e 10 arquivos de teste usam
+  `require`) e `eslint` (9+ exige flat config, migração própria).
+
+### Changed — `dependabot.yml`: majors saem do grupo
+
+- O grupo `npm-dependencies` passa a aceitar apenas `minor`/`patch`; majors vêm
+  em PR individual. O PR #8 juntou 9 pacotes com **6 majors** — incluindo
+  `vscode-languageclient` e `chai` — num diff de 2 mil linhas, impossível de
+  revisar ou reverter em partes.
+- `vscode-languageclient`, `@types/vscode` e `chai` passam a ignorar majors,
+  com o motivo registrado no arquivo. Mesmo padrão adotado no `synesis-lsp`
+  para `pygls`/`lsprotocol`, onde a regressão reincidiu duas vezes.
+
 ## [0.12.0] - 2026-08-18
 
 > As correções abaixo marcadas com **(LSP)** requerem `synesis-lsp` **0.23.0+**;
