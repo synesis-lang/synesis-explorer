@@ -15,7 +15,8 @@ const {
 } = require('../../src/chat/sourceAnchor');
 const { extractOriginRecords, groupByOrigin } = require('../../src/chat/auditTrail');
 
-const ROOT = path.join('D:', 'GitHub', 'case-studies', 'ufmg', 'face85');
+// Absoluta em qualquer plataforma — ver a nota em pathContainment.test.js.
+const ROOT = path.resolve(path.sep, 'GitHub', 'case-studies', 'ufmg', 'face85');
 
 describe('Âncora — construção da Location', () => {
     it('converte a linha do grafo (1-based) para Position (0-based)', () => {
@@ -53,7 +54,7 @@ describe('Âncora — construção da Location', () => {
         // noutra máquina — e abri-lo às cegas é o que a contenção evita.
         const absolute = path.join(ROOT, 'face85.syn');
         assert.strictEqual(buildSourceLocation(absolute, 7), undefined);
-        assert.strictEqual(buildSourceLocation(absolute, 7, path.join('D:', 'outro')), undefined);
+        assert.strictEqual(buildSourceLocation(absolute, 7, path.resolve(path.sep, 'outro')), undefined);
     });
 
     it('ancora no topo quando a linha falta ou é inválida', () => {
@@ -321,7 +322,7 @@ describe('Âncora — contenção do caminho', () => {
     });
 
     it('resolve contra qualquer raiz aberta — multi-root', () => {
-        const OUTRO = path.join('D:', 'GitHub', 'outro');
+        const OUTRO = path.resolve(path.sep, 'GitHub', 'outro');
         const f = fake();
         const emitted = streamSourceAnchors(f.stream, [{ file: 'notas.syn', line: 3 }], ROOT, {
             roots: [ROOT, OUTRO],

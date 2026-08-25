@@ -11,8 +11,12 @@ const assert = require('assert');
 const path = require('path');
 const { isWithin, resolveWithinRoots, orderedRoots } = require('../../src/core/pathContainment');
 
-const ROOT = path.join('D:', 'GitHub', 'face85');
-const OUTRO = path.join('D:', 'GitHub', 'outro-projeto');
+// `path.resolve`, não `path.join('D:', ...)`: a raiz precisa ser ABSOLUTA na
+// plataforma onde o teste roda. `path.join('D:', 'x')` produz `D:x` — relativo à
+// unidade corrente no Windows, e um nome de pasta comum no Linux. O CI roda em
+// Ubuntu, e a diferença fazia dez testes passarem aqui e falharem lá.
+const ROOT = path.resolve(path.sep, 'GitHub', 'face85');
+const OUTRO = path.resolve(path.sep, 'GitHub', 'outro-projeto');
 
 describe('Contenção — isWithin', () => {
     it('aceita filho direto e aninhado', () => {
@@ -30,7 +34,7 @@ describe('Contenção — isWithin', () => {
         // `D:/GitHub/face85-evil` começa com `D:/GitHub/face85` como STRING mas
         // não está dentro dele. É por isso que a comparação é por componente de
         // caminho, não por prefixo.
-        assert.ok(!isWithin(path.join('D:', 'GitHub', 'face85-evil', 'x.syn'), ROOT));
+        assert.ok(!isWithin(path.resolve(path.sep, 'GitHub', 'face85-evil', 'x.syn'), ROOT));
     });
 
     it('recusa escape por `..`', () => {
@@ -68,8 +72,12 @@ describe('Contenção — resolveWithinRoots', () => {
     it('RECUSA absoluto fora de toda raiz', () => {
         // Grafo exportado na máquina de outro pesquisador: o caminho existe lá,
         // não aqui. Abri-lo às cegas é o que se evita.
+        // Absoluto de verdade na plataforma corrente: `path.join('C:', ...)`
+        // produziria `C:Users/...`, que o Linux trata como relativo — o teste
+        // passaria pelo motivo errado (barrado como escape, não como absoluto
+        // fora da raiz).
         assert.strictEqual(
-            resolveWithinRoots(path.join('C:', 'Users', 'outro', 'segredo.syn'), [ROOT]),
+            resolveWithinRoots(path.resolve(path.sep, 'Users', 'outro', 'segredo.syn'), [ROOT]),
             undefined
         );
     });
