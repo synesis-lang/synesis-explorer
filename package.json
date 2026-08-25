@@ -2,7 +2,7 @@
   "name": "synesis",
   "displayName": "Synesis",
   "description": "Knowledge Engineering in VS Code: Official LSP client for Synesis.",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "publisher": "synesis-lang",
   "author": "Christian Maciel De Britto",
   "license": "MIT",
@@ -16,7 +16,7 @@
   "homepage": "https://github.com/synesis-lang/synesis-vscode#readme",
   "icon": "synesis-icon.png",
   "engines": {
-    "vscode": "^1.82.0"
+    "vscode": "^1.104.0"
   },
   "categories": [
     "Programming Languages",
@@ -32,7 +32,8 @@
     "CAQDAS"
   ],
   "activationEvents": [
-    "workspaceContains:*.synp"
+    "workspaceContains:*.synp",
+    "onChatParticipant:synesis.chatAssistant"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -161,6 +162,42 @@
       ]
     },
     "commands": [
+      {
+        "command": "synesis.chat.configureProvider",
+        "title": "Synesis: Configurar Provedor de IA (Anthropic / OpenAI / Gemini / OpenRouter)"
+      },
+      {
+        "command": "synesis.chat.removeProviderKey",
+        "title": "Synesis: Remover API Key de Provedor de IA"
+      },
+      {
+        "command": "synesis.chat.configureConnection",
+        "title": "Synesis: Configurar Conexão do Banco (ArcadeDB)"
+      },
+      {
+        "command": "synesis.chat.removeConnectionPassword",
+        "title": "Synesis: Remover Senha do Banco"
+      },
+      {
+        "command": "synesis.chat.selectDatabase",
+        "title": "Synesis: Selecionar Banco do Chat"
+      },
+      {
+        "command": "synesis.chat.auditTrail",
+        "title": "Synesis: Ver Evidências e Consultas do Turno"
+      },
+      {
+        "command": "synesis.chat.reassess",
+        "title": "Synesis: Reavaliar Resposta (nova execução)"
+      },
+      {
+        "command": "synesis.chat.showMetrics",
+        "title": "Synesis: Métricas do Chat (comparar modelos)"
+      },
+      {
+        "command": "synesis.chat.setupArcadeDbConnection",
+        "title": "Synesis: Conectar ao ArcadeDB (MCP)"
+      },
       {
         "command": "synesis.lsp.loadProject",
         "title": "Synesis: LSP Load Project"
@@ -434,6 +471,14 @@
       ],
       "commandPalette": [
         {
+          "command": "synesis.chat.auditTrail",
+          "when": "false"
+        },
+        {
+          "command": "synesis.chat.reassess",
+          "when": "false"
+        },
+        {
           "command": "synesis.relation.filterActive",
           "when": "false"
         },
@@ -493,62 +538,161 @@
         "editor.semanticHighlighting.enabled": true
       }
     },
-    "configuration": {
-      "title": "Synesis",
-      "properties": {
-        "synesisExplorer.lsp.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable Synesis LSP integration."
-        },
-        "synesisExplorer.lsp.pythonPath": {
-          "type": "string",
-          "default": "synesis-lsp",
-          "scope": "machine",
-          "description": "Synesis LSP executable path. Machine-scoped: cannot be overridden by a workspace's .vscode/settings.json, so opening an untrusted project cannot redirect the executable that is launched."
-        },
-        "synesisExplorer.lsp.args": {
-          "type": "array",
-          "default": [],
-          "scope": "machine",
-          "description": "Arguments passed to the Synesis LSP executable (e.g. [\"-m\", \"synesis_lsp\"]). Machine-scoped for the same reason as lsp.pythonPath.",
-          "items": {
-            "type": "string"
+    "configuration": [
+      {
+        "title": "Chat (@synesis)",
+        "order": 1,
+        "properties": {
+          "synesisExplorer.chat.credentials": {
+            "type": "null",
+            "default": null,
+            "markdownDescription": "**Chaves de API e senha do banco não ficam aqui.** Elas são guardadas criptografadas pelo sistema operacional, fora dos arquivos do projeto — um `settings.json` é texto puro, sincroniza entre máquinas e é legível por outras extensões.\n\n- [Configurar provedor de IA](command:synesis.chat.configureProvider) — Anthropic, OpenAI, Gemini ou OpenRouter\n- [Configurar conexão do banco](command:synesis.chat.configureConnection) — servidor, usuário e senha\n- [Conectar ao ArcadeDB (MCP)](command:synesis.chat.setupArcadeDbConnection) — grava a conexão no workspace\n- [Selecionar banco do chat](command:synesis.chat.selectDatabase)",
+            "scope": "application"
+          },
+          "synesisExplorer.chat.preferredProvider": {
+            "type": "string",
+            "enum": [
+              "",
+              "anthropic",
+              "openai",
+              "gemini",
+              "openrouter"
+            ],
+            "enumDescriptions": [
+              "Nenhum — escolha o modelo na própria caixa de chat.",
+              "Anthropic (Claude)",
+              "OpenAI (GPT)",
+              "Google Gemini",
+              "OpenRouter — inclui modelos gratuitos"
+            ],
+            "default": "",
+            "description": "Provedor de IA preferido do @synesis. Só aparece no seletor de modelo depois de configurar a chave correspondente.",
+            "scope": "application"
+          },
+          "synesisExplorer.chat.arcadedb.uri": {
+            "type": "string",
+            "default": "http://localhost:2480",
+            "scope": "machine",
+            "description": "Endpoint HTTP do servidor ArcadeDB que o chat @synesis consulta (a porta 2480 também serve o Studio). Machine-scoped: um workspace não confiável não pode redirecionar a conexão para outro host."
+          },
+          "synesisExplorer.chat.arcadedb.user": {
+            "type": "string",
+            "default": "root",
+            "scope": "machine",
+            "description": "Usuário do ArcadeDB usado pelo chat. A senha NÃO fica aqui — é guardada criptografada pelo comando \"Synesis: Configurar Conexão do Banco\". Prefira um usuário só de leitura: o chat não precisa escrever no grafo."
+          },
+          "synesisExplorer.chat.showMetricsButton": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Oferece o botão **Métricas da sessão** ao fim das respostas.\n\nDesligado por padrão: as métricas são **diagnóstico exploratório**, não um veredito sobre qual modelo é mais confiável. A precisão literal verifica que o trecho existe no banco, não que ele sustenta a afirmação; as perguntas-armadilha são genéricas e um corpus que trate legitimamente desses temas seria penalizado; e uma sessão pode misturar modelos e bancos. O comando continua disponível na paleta."
+          },
+          "synesisExplorer.chat.maxToolRounds": {
+            "type": "integer",
+            "default": 16,
+            "minimum": 4,
+            "maximum": 40,
+            "markdownDescription": "Quantas consultas ao banco o assistente pode encadear numa resposta.\n\nO limite existe para conter um modelo que entrou em laço, não para economizar chamadas: perguntas que atravessam conceito → trecho → referência gastam várias consultas antes da útil. Abaixo de 8 as respostas ficam incompletas.",
+            "scope": "application"
           }
-        },
-        "synesisExplorer.diagnostics.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable inline diagnostics (error/warning squiggles) from the Synesis LSP."
-        },
-        "synesisExplorer.inlayHints.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show inline hints after @bibrefs (e.g. \"(Author, Year)\")."
-        },
-        "synesisExplorer.semanticHighlighting.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Enable AST-based semantic syntax highlighting (more accurate than TextMate grammar). Requires Synesis Dark or Synesis Light theme, or a theme with semanticTokenColors support."
-        },
-        "synesisExplorer.completion.autoImportCodes": {
-          "type": "boolean",
-          "default": true,
-          "description": "Include ontology codes from the compiled project in autocomplete suggestions."
-        },
-        "synesisExplorer.coder.path": {
-          "type": "string",
-          "default": "synesis-coder",
-          "scope": "machine",
-          "description": "Path to the synesis-coder executable. Machine-scoped: cannot be overridden by a workspace's .vscode/settings.json."
+        }
+      },
+      {
+        "title": "Language Server",
+        "order": 2,
+        "properties": {
+          "synesisExplorer.lsp.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable Synesis LSP integration."
+          },
+          "synesisExplorer.lsp.pythonPath": {
+            "type": "string",
+            "default": "synesis-lsp",
+            "scope": "machine",
+            "description": "Synesis LSP executable path. Machine-scoped: cannot be overridden by a workspace's .vscode/settings.json, so opening an untrusted project cannot redirect the executable that is launched."
+          },
+          "synesisExplorer.lsp.args": {
+            "type": "array",
+            "default": [],
+            "scope": "machine",
+            "description": "Arguments passed to the Synesis LSP executable (e.g. [\"-m\", \"synesis_lsp\"]). Machine-scoped for the same reason as lsp.pythonPath.",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      {
+        "title": "Editor",
+        "order": 3,
+        "properties": {
+          "synesisExplorer.diagnostics.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable inline diagnostics (error/warning squiggles) from the Synesis LSP."
+          },
+          "synesisExplorer.inlayHints.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show inline hints after @bibrefs (e.g. \"(Author, Year)\")."
+          },
+          "synesisExplorer.semanticHighlighting.enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Enable AST-based semantic syntax highlighting (more accurate than TextMate grammar). Requires Synesis Dark or Synesis Light theme, or a theme with semanticTokenColors support."
+          },
+          "synesisExplorer.completion.autoImportCodes": {
+            "type": "boolean",
+            "default": true,
+            "description": "Include ontology codes from the compiled project in autocomplete suggestions."
+          }
+        }
+      },
+      {
+        "title": "Coder",
+        "order": 4,
+        "properties": {
+          "synesisExplorer.coder.path": {
+            "type": "string",
+            "default": "synesis-coder",
+            "scope": "machine",
+            "description": "Path to the synesis-coder executable. Machine-scoped: cannot be overridden by a workspace's .vscode/settings.json."
+          }
         }
       }
-    }
+    ],
+    "chatParticipants": [
+      {
+        "id": "synesis.chatAssistant",
+        "name": "synesis",
+        "fullName": "Synesis Assistant",
+        "description": "Consulta o grafo Synesis (ArcadeDB) via MCP.",
+        "isSticky": true
+      }
+    ],
+    "languageModelChatProviders": [
+      {
+        "vendor": "synesis-anthropic",
+        "displayName": "Synesis (Anthropic)"
+      },
+      {
+        "vendor": "synesis-openai",
+        "displayName": "Synesis (OpenAI)"
+      },
+      {
+        "vendor": "synesis-gemini",
+        "displayName": "Synesis (Google Gemini)"
+      },
+      {
+        "vendor": "synesis-openrouter",
+        "displayName": "Synesis (OpenRouter)"
+      }
+    ]
   },
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": "limited",
-      "description": "In an untrusted workspace the language server and synesis-coder are launched only from the machine-level executable paths, never from a path supplied by the workspace."
+      "description": "In an untrusted workspace the language server and synesis-coder are launched only from the machine-level executable paths, never from a path supplied by the workspace. The chat assistant is also affected: a workspace's .vscode/mcp.json can point at an arbitrary host, and answering a question sends the conversation to the AI provider configured with your API key. Review that file before trusting a workspace you did not create."
     }
   },
   "scripts": {
@@ -573,7 +717,7 @@
     "@eslint/js": "^10.0.1",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
-    "@types/vscode": "~1.82.0",
+    "@types/vscode": "~1.104.0",
     "@vscode/test-cli": "^0.0.15",
     "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.9.2",

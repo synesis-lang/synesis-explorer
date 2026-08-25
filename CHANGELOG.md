@@ -7,6 +7,274 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-25
+
+### Added — Chat `@synesis`: consulta ao grafo com trilha de auditoria
+
+Assistente embutido que consulta o grafo do projeto (ArcadeDB) a partir do VS
+Code, sem depender de assinatura do Copilot — o pesquisador escolhe o provedor.
+**Toda afirmação sobre o corpus mostra o trecho e a referência que a sustentam**,
+com link clicável até a linha do `.syn` anotado.
+
+**Participant e provedores**
+
+- Participant `@synesis` (`vscode.chat.createChatParticipant`) com loop próprio
+  de tool-calling, teto configurável em `synesisExplorer.chat.maxToolRounds`
+  (padrão 16, faixa 4–40).
+- Quatro provedores — Anthropic, OpenAI, Google Gemini e OpenRouter — registrados
+  como `LanguageModelChatProvider`. Cada um só aparece no seletor depois que a
+  API key é configurada.
+- **Segredos apenas em `context.secrets`.** API keys e senha do banco nunca vão
+  para `settings.json`. A aba de configuração agrupa tudo o que não é segredo e
+  aponta, por link de comando, para o que é.
+- Conexão com o ArcadeDB configurada dentro do VS Code, independente do
+  `config.toml` do projeto.
+
+**Trilha de auditoria**
+
+- **Citação obrigatória, em ordem quote-first**: o trecho literal vem antes da
+  análise, e o modelo é instruído a declarar explicitamente quando uma afirmação
+  não tem lastro no corpus. Distingue três origens — o que está nos trechos, o
+  que vem do template, e o que é síntese do modelo.
+- **Verificação de literalidade das citações** (`src/chat/citationGuard.js`):
+  confere se cada citação existe nos registros que o banco devolveu. Comparação
+  de strings, sem juiz LLM. Tolera aspas tipográficas, recorte com reticências e
+  escapes de LaTeX herdados do `.syn`.
+  - **Por registro, não por colagem.** Uma citação precisa caber inteira num
+    único campo `citation`, na ordem em que a resposta a apresenta. A versão
+    anterior concatenava todos os payloads do turno e procurava cada segmento
+    nessa massa — aprovando uma citação montada com um pedaço de uma fonte e
+    outro de outra.
+  - O nome é deliberado: ela verifica **literalidade**, não fidelidade. Não diz
+    se a citação sustenta a afirmação que a acompanha, nem se as demais
+    afirmações têm lastro — e o aviso deixou de sugerir que dizia.
+- **Toda contagem nomeia a unidade** (`COUNTING_RULES`). Fontes, trechos
+  anotados (`annotation_id`), itens analíticos (`item_id`), menções e conceitos
+  são cinco números diferentes sobre os mesmos dados — um bloco `ITEM` com
+  quatro chains é 1 trecho e 4 itens. O prompt passa a exigir "20 menções", não
+  "20", e traz a expressão que mede cada unidade.
+- **Regra de divergência.** Antes de contradizer um número da resposta anterior,
+  a reavaliação precisa comparar a UNIDADE dos dois; se diferirem, não há
+  divergência. Só com unidades iguais ela refaz a medição — e recebe as
+  consultas originais do turno, do `turnTrace`, para poder repetir exatamente a
+  mesma. Divergência é hipótese até a unidade ser igualada.
+- **Parser único de evidência** (`src/chat/evidence.js`): guarda, âncoras,
+  trilha e métricas passam a ler o payload uma vez só. Havia duas
+  interpretações do mesmo dado, uma preservando a estrutura e outra perdendo-a.
+- **Botão "Ver evidências e consultas do turno"** ao fim das respostas que
+  consultaram o corpus. Abre um relatório em Markdown com a pergunta, o banco, o
+  modelo, **as consultas executadas na ordem** e as evidências que voltaram.
+  Sob demanda, não como rodapé fixo — o que sempre aparece deixa de ser lido.
+  - **Clicar não chama o modelo nem consulta o banco**: o relatório é renderizado
+    a partir do registro estruturado capturado durante a resposta
+    (`src/chat/turnTrace.js`). Reproduzir o turno e pedir a um novo ciclo do
+    modelo que o reconstrua são coisas diferentes — a segunda pode discordar da
+    primeira sem estar certa.
+  - Cada botão carrega o **ID do seu turno**, então a resposta antiga continua
+    abrindo o registro dela depois de novas perguntas ou troca de banco.
+  - O botão só aparece quando houve de fato consulta ao corpus, e o rótulo diz o
+    que entrega: evidências quando há trecho anotado, consultas e unidades quando
+    a resposta veio de contagens.
+- **Comando "Reavaliar resposta"**, separado do relatório: é uma nova execução do
+  modelo sobre a mesma pergunta, pode discordar, e não substitui o registro do
+  turno. Avisa quando o banco selecionado mudou desde a resposta original.
+- **Mínimo privilégio nas ferramentas do modelo**: `execute_command` deixou de
+  ser entregue ao chat. Antes ela estava disponível e o prompt pedia que não
+  fosse usada — proteção que dependia de o modelo obedecer, com corpus não
+  confiável entrando no contexto.
+- **Âncoras clicáveis** até o arquivo `.syn`, rotuladas pela referência
+  (`avelar2016 (2016): "Salienta-se que…"`). Requer grafo gerado por
+  `synesis-graph` com `source_file`/`source_line`. São emitidas para as origens
+  que **sustentam uma citação da resposta** — antes saíam de tudo que o turno
+  consultou, incluindo o que o modelo explorou e descartou.
+- **Métricas do chat: nomes honestos e `N/A`** (`src/chat/chatMetrics.js`).
+  - `citationCoverage` virou `literalQuotePrecision` e passou a admitir `null`.
+    Ela valia **1 quando não houve citação alguma** — cobertura perfeita e nada
+    medido saíam idênticos no relatório —, e o nome prometia cobertura das
+    afirmações quando media a precisão das citações detectadas. Afirmação sem
+    citação é invisível a ela.
+  - `allQueriesEmpty` classificava `{"records":[{"count":0}]}` como resultado,
+    porque a linha existe; o próprio comentário do código dizia que `count: 0`
+    deve valer como vazio. Agora distingue cinco casos: sem linhas, agregação
+    zerada, linhas, não-JSON e erro.
+  - As contagens vêm do `turnTrace`: chamadas de ferramenta reais, prefetch da
+    extensão, falhas e consultas sem dado, separados.
+  - O relatório registra **modelo, banco e data**, e avisa quando a sessão
+    misturou modelos ou bancos — sem isso, uma troca no meio da sessão parecia
+    diferença entre modelos.
+  - O botão fica atrás de `synesisExplorer.chat.showMetricsButton`
+    (desligado por padrão): enquanto não houver bateria por corpus, são
+    diagnóstico exploratório, e um número oferecido por botão vira selo de
+    qualidade. O comando continua na paleta.
+- **O escopo das métricas de rede vem do grafo.** Quando o `ProjectContext`
+  declara `metrics_backend`/`metrics_scope`, o chat diz qual backend calculou e
+  sobre que projeção, em vez de repetir um texto fixo.
+- **Busca lexical declarada pelo grafo** (`src/chat/lexicalCapability.js`).
+  Quando o `ProjectContext` traz `fulltext_*`, o prompt ganha os identificadores
+  exatos dos índices (`Chain[search_name, ontology_description]`) e a consulta
+  SQL pronta. O chat também diz honestamente quando o analyzer é o
+  `StandardAnalyzer`, que **não** dobra acento — apresentar a busca como
+  insensível a acento nesse caso seria errado.
+- **Contenção de caminho e multi-root nas âncoras** (`src/core/pathContainment.js`).
+  O caminho vem do grafo — dado não confiável, possivelmente gerado noutra
+  máquina ou servido por um ArcadeDB remoto —, e era resolvido com `path.join`
+  contra a primeira pasta do workspace, sem verificação: um `../../..` escapava
+  da raiz, e num workspace multi-root a âncora simplesmente não abria.
+  - O destino precisa estar **dentro de uma pasta aberta**; caminho absoluto só
+    é aceito se cair numa delas.
+  - Todas as raízes são tentadas, a do editor ativo primeiro.
+  - As origens recusadas aparecem no relatório do turno, com o motivo — um link
+    ausente em silêncio parece bug do editor, não caminho fora da raiz.
+- **A prosa exploratória não é mais emitida como resposta.** O texto que o modelo
+  escreve antes de decidir consultar ("vou verificar quantos itens existem…")
+  aparecia na tela como se fosse conclusão e entrava na verificação e nas
+  métricas. Agora fica no relatório do turno, rotulado como raciocínio e
+  explicitamente não verificado.
+
+**Busca semântica e métricas do grafo**
+
+- O chat passa a usar o **índice vetorial** do ArcadeDB quando o grafo declara
+  tê-lo, e a **marcar o resultado como proximidade, não menção** — um vizinho
+  vetorial é sugestão de leitura, não algo que o pesquisador afirmou.
+- Passa a usar as **métricas de rede pré-calculadas** (`pagerank`,
+  `betweenness`, `community`…) em vez de contar arestas à mão, e a dizer qual
+  métrica usou.
+- Ambas são condicionais ao schema real: um grafo sem vetores ou sem métricas
+  não recebe a instrução.
+
+**Métricas de sessão**
+
+- Comando **Synesis: Métricas do Chat** e botão a partir do segundo turno:
+  rodadas por resposta, cobertura de citação e abstenção em perguntas-armadilha.
+  Nenhuma usa juiz LLM. Servem para comparar modelos no mesmo corpus.
+
+**Idioma**
+
+- Prompt de sistema em inglês, com regra explícita de **responder no idioma da
+  pergunta** e nunca traduzir um trecho citado. Instruções em inglês melhoram a
+  aderência sem impor o idioma da resposta.
+- Interface (saudação, trilha, mensagens) segue em português.
+
+### Fixed — chat
+
+- **Ferramentas MCP não eram reconhecidas.** O VS Code renomeia ferramentas de
+  MCP (`mcp_<servidor>_<ferramenta>`), e a comparação por nome exato não casava
+  nada: o modelo respondia sem consultar, inventando bancos inexistentes.
+- **Respostas inventadas quando não havia ferramenta.** O chat agora recusa
+  responder e explica, em vez de produzir dado plausível.
+- **`@synesis` sem pergunta quebrava** com erro do provedor. Agora apresenta o
+  projeto, com dados lidos do grafo e perguntas sugeridas.
+- **Perguntas complexas esgotavam o limite sem responder.** Teto subiu de 8 para
+  16 rodadas e o aviso deixou de passar por rodapé: diz que a resposta está
+  incompleta.
+- **Prompt de sistema contraditório** sobre `list_databases` (mandava sempre
+  chamar e nunca chamar).
+- **Convenção de nomes presumida.** O prompt afirmava que conceitos são
+  `snake_case` minúsculo — falso em projetos que usam `Acceptance_Criteria`.
+  Agora manda ler os nomes reais do schema.
+- **Busca sensível a acento dava falsa ausência.** Procurar `psicologicos` não
+  encontra `psicológicos`, e o chat afirmava que o conceito não existia no
+  corpus. Agora, **quando o grafo declara um índice full-text**, o chat usa
+  `SEARCH_INDEX` — que resolve acento pelo analyzer do projeto, em vez de por
+  uma transformação que o modelo faz de cabeça. Sem índice declarado (grafo
+  antigo ou backend Neo4j), permanece a regra de prefixo sem diacrítico. Em
+  qualquer caso, é proibido afirmar ausência sem ter tentado.
+
+### Changed — o assistente aprende o schema do projeto em vez de presumi-lo
+
+- `describeProjectSchema()` lê o schema real do banco a cada pergunta e o injeta
+  no prompt: rótulo de conceito e arestas de taxonomia variam por template.
+- O contexto do projeto (`ProjectContext`, gravado pelo `synesis-graph`) alimenta
+  a saudação e as respostas. O `template_doc` (~6,5k tokens) só é carregado
+  quando a pergunta precisa dele.
+- **O gatilho do `template_doc` é estrutural, não lexical.** Ele carrega no
+  primeiro turno da conversa, ou quando a pergunta não nomeia nada que o schema
+  conheça. O critério anterior casava 26 palavras em português (`campo`,
+  `escala`, `tópico`…): num corpus em inglês nenhuma casava, e o documento
+  **nunca** era carregado — o chat perdia em silêncio a camada que o adapta ao
+  projeto.
+- **A taxonomia da saudação sai do schema.** A consulta fixava `GROUPED_BY` e
+  `Topic`, que são o template do face85 e não um invariante do Synesis; um
+  projeto sem `topic` perdia as sugestões sem dizer por quê. Agora a taxonomia,
+  a aresta (incluindo `HAS_<CAMPO>`) e o rótulo exibido vêm do banco.
+- **As sugestões de centralidade são condicionais.** Sugerir PageRank a um grafo
+  que não o calculou — Neo4j, ou export sem métricas — entregava ao pesquisador
+  uma pergunta que falha.
+- **"Mais central" deixou de ter resposta única.** O prompt afirmava que PageRank
+  é a métrica certa; centralidade é uma operacionalização metodológica, e a
+  escolha é do pesquisador. O chat passa a oferecer os sentidos que o grafo
+  suporta e a declarar qual usou. Também informa que, no ArcadeDB, as métricas
+  são calculadas sobre o grafo inteiro — trechos, referências e taxonomias
+  incluídos —, não só sobre a rede de conceitos.
+- A regra de busca sem acento passou a falar em **diacrítico**, não em "vogal
+  acentuada": o critério (maior prefixo sem diacrítico) vale em qualquer idioma.
+
+### Security — o chat amplia a superfície de um workspace não confiável
+
+- `capabilities.untrustedWorkspaces` passou a registrar que um `.vscode/mcp.json`
+  vindo do workspace pode apontar para um host arbitrário, e que responder a uma
+  pergunta envia a conversa ao provedor configurado com a API key do usuário.
+  A descrição anterior só falava do language server e do `synesis-coder`.
+- **Escrita de `mcp.json` é merge, nunca sobrescrita.** Outros servidores MCP
+  configurados sobrevivem; colisão de nome pede confirmação explícita.
+- Se o `mcp.json` existir mas não puder ser lido como JSON — o caso comum são
+  comentários, que o formato aceita e o `JSON.parse` não —, o comando **aborta
+  sem gravar**. Tratar "não consegui ler" como "arquivo vazio" apagaria em
+  silêncio os servidores já configurados.
+- As ferramentas MCP oferecidas ao modelo são filtradas por **nome exato**
+  (`query`, `get_schema`, `list_databases`, `server_status` — `execute_command`
+  não é entregue ao chat).
+  O filtro anterior era por substring e capturava ferramentas de outros
+  servidores MCP no mesmo workspace, como `gitnexus_query`. As demais que o
+  ArcadeDB expõe (`profiler_*`, `*_server_setting*`) ficam de fora por serem de
+  administração, e uma delas escreve.
+
+### Changed — `engines.vscode` de `^1.82.0` para `^1.104.0`
+
+- Exigido pelas APIs de chat acima: `registerLanguageModelChatProvider` só
+  estabilizou no VS Code 1.104 (ago/2025). `@types/vscode` acompanhou, para os
+  tipos não prometerem APIs que o editor mínimo não garante.
+- **Consequência para usuários:** editores entre 1.82 e 1.103 deixam de receber
+  atualizações da extensão. É o preço do chat embutido — não há como oferecer a
+  funcionalidade com um mínimo mais baixo.
+
+### Pendente de validação
+
+- Só o provedor **Anthropic** passou por teste ponta a ponta. OpenAI, Gemini e
+  OpenRouter seguem formatos de API confirmados, mas não foram exercitados pelo
+  caminho real dentro do VS Code.
+- O chat foi validado ao vivo apenas contra um corpus **em português**. A
+  independência de idioma tem cobertura de teste, mas não verificação ao vivo.
+- As respostas **não são streamed**: os providers fazem requisição
+  não-streaming e a resposta aparece de uma vez.
+- **A regra de unidade e a de divergência são instruções ao modelo**, não
+  garantias verificadas. O dado que as sustenta é determinístico
+  (`Item.annotation_id`, no `synesis-graph`), e o relatório do turno mostra a
+  consulta que produziu cada número sem recontar — mas nada impede o modelo de
+  desobedecer. Medir a adesão exige uma bateria por corpus.
+- O relatório do turno mostra **todas** as consultas executadas, incluindo as
+  exploratórias que o modelo descartou — de propósito, é o registro do percurso.
+  As **âncoras**, essas, saem só das origens que sustentam uma citação. O que
+  falta é o vínculo fino: qual evidência sustenta qual afirmação, o que exige um
+  protocolo de marcação por afirmação.
+- **A verificação de existência do arquivo não está no caminho de emissão.**
+  `fileExists()` existe e é testável, mas emitir âncoras é síncrono e ligá-la
+  mudaria a ordem do stream em relação ao aviso de literalidade. Uma âncora para
+  um `.syn` renomeado desde o último sync ainda é oferecida e falha ao abrir.
+- **A escolha de raiz em multi-root é heurística** — editor ativo, depois ordem
+  das pastas —, não uma associação projeto↔banco. Dois projetos com um
+  `face85.syn` cada resolvem para o do editor ativo, que pode não ser o do grafo
+  consultado.
+- **A bateria de perguntas por corpus não existe.** As perguntas-armadilha são
+  globais e genéricas; um corpus que trate legitimamente de política monetária
+  seria penalizado por elas. É o pré-requisito para o botão de métricas sair de
+  trás de `synesisExplorer.chat.showMetricsButton`, e para
+  `claimCitationCoverage` deixar de ser `N/A`.
+- **Os recursos que dependem do grafo re-exportado** — contagem de trechos
+  (`annotation_id`), `SEARCH_INDEX`, escopo das métricas — só aparecem em banco
+  gerado pelo `synesis-graph` 0.9.0 ou posterior. Em grafo antigo o chat degrada
+  para o comportamento anterior, e diz isso em vez de inventar.
+
 ### Changed — `engines.vscode` corrigido para `^1.82.0`
 
 - O manifesto declarava `^1.60.0`, mas `vscode-languageclient@9` — já em uso —

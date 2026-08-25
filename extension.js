@@ -47,8 +47,24 @@ const AbstractViewer = require('./src/viewers/abstractViewer');
 // Services
 const CoderService = require('./src/services/coderService');
 
+// Chat (Via B - MCP-connected chat participant, multi-provider)
+const { registerAllProviders, configureProviderCommand, removeProviderKeyCommand } = require('./src/chat/providerRegistry');
+const { registerChatParticipant } = require('./src/chat/chatParticipant');
+const {
+    selectDatabaseCommand,
+    getSelectedDatabase,
+    formatStatusBarText,
+    formatStatusBarTooltip
+} = require('./src/chat/databaseSelection');
+const { setupArcadeDbConnectionCommand } = require('./src/chat/mcpSetup');
+const {
+    configureConnectionCommand,
+    removeConnectionPasswordCommand
+} = require('./src/chat/connectionSettings');
+
 let lspClient;
 let lspStatusItem;
+let chatDatabaseStatusItem;
 let lspLoadTimer;
 let dataService;
 let lspStartPromise;
@@ -770,6 +786,45 @@ function activate(context) {
     context.subscriptions.push(relationTreeView);
     context.subscriptions.push(ontologyTreeView);
     context.subscriptions.push(ontologyAnnotationTreeView);
+
+    // Chat (Via B) - registra um LanguageModelChatProvider por provedor
+    // suportado (Anthropic/OpenAI/Gemini/OpenRouter); cada um só aparece no
+    // seletor de modelo depois que o pesquisador configura a respectiva
+    // API key via comando.
+    try {
+        const providerDisposables = registerAllProviders(context);
+        for (const disposable of providerDisposables) {
+            context.subscriptions.push(disposable);
+        }
+        registerChatParticipant(context);
+
+        // Indicador do banco ativo, no mesmo padrão do item de status do LSP.
+        // Prioridade 99 o mantém imediatamente à direita do LSP (100).
+        chatDatabaseStatusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+        chatDatabaseStatusItem.command = 'synesis.chat.selectDatabase';
+        updateChatDatabaseStatus(getSelectedDatabase(context));
+        chatDatabaseStatusItem.show();
+        context.subscriptions.push(chatDatabaseStatusItem);
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand('synesis.chat.configureProvider', () => configureProviderCommand(context)),
+            vscode.commands.registerCommand('synesis.chat.removeProviderKey', () => removeProviderKeyCommand(context)),
+            vscode.commands.registerCommand('synesis.chat.selectDatabase', () =>
+                selectDatabaseCommand(context, updateChatDatabaseStatus)
+            ),
+            vscode.commands.registerCommand('synesis.chat.setupArcadeDbConnection', () =>
+                setupArcadeDbConnectionCommand(context)
+            ),
+            vscode.commands.registerCommand('synesis.chat.configureConnection', () =>
+                configureConnectionCommand(context)
+            ),
+            vscode.commands.registerCommand('synesis.chat.removeConnectionPassword', () =>
+                removeConnectionPasswordCommand(context)
+            )
+        );
+    } catch (error) {
+        console.error('Synesis Chat: falha ao registrar chat provider/participant', error);
+    }
 }
 
 /**
@@ -1036,6 +1091,15 @@ async function startLspClient(client, pythonPath, lspArgs = []) {
         vscode.window.showErrorMessage(`Failed to start Synesis LSP: ${error.message}.${hint}`);
         return false;
     }
+}
+
+/** Reflete na status bar o banco que o @synesis vai consultar. */
+function updateChatDatabaseStatus(database) {
+    if (!chatDatabaseStatusItem) {
+        return;
+    }
+    chatDatabaseStatusItem.text = formatStatusBarText(database);
+    chatDatabaseStatusItem.tooltip = formatStatusBarTooltip(database);
 }
 
 function setLspStatus(state, stats, lspVersion, compilerVersion) {
